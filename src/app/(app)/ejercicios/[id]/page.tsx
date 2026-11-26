@@ -5,7 +5,7 @@ import { setExerciseArchived } from "@/app/actions/exercises";
 import { SubmitButton } from "@/components/SubmitButton";
 import { requireUser } from "@/lib/auth";
 import { EXERCISE_COLUMNS, getMuscleGroups } from "@/lib/muscle-groups";
-import { muscleGroupName } from "@/lib/muscle-group-utils";
+import { muscleGroupName, UNCLASSIFIED_LABEL } from "@/lib/muscle-group-utils";
 import { createClient } from "@/lib/supabase/server";
 import type { Exercise } from "@/lib/types";
 import { isUuid } from "@/lib/validation";
@@ -32,10 +32,19 @@ export default async function ExercisePage({ params, searchParams }: PageProps<"
       <div className="page-head">
         <div>
           <h1>{data.name}</h1>
-          {data.muscle_group_id ? <div className="muted">{muscleGroupName(groups, data.muscle_group_id)}</div> : null}
+          {data.muscle_group_id ? (
+            <div className="muted">{muscleGroupName(groups, data.muscle_group_id)}</div>
+          ) : (
+            <span className="badge badge-warning">{UNCLASSIFIED_LABEL}</span>
+          )}
         </div>
         {archived ? <span className="badge">Archivado</span> : null}
       </div>
+      {!data.muscle_group_id ? (
+        <p className="alert alert-warning">
+          Este ejercicio no tiene grupo muscular. Selecciona uno y guarda para clasificarlo; su historial se conserva.
+        </p>
+      ) : null}
       <Link href={`/progreso/${data.id}`} className="btn btn-block">Ver progreso e historial</Link>
 
       <section className="card stack">

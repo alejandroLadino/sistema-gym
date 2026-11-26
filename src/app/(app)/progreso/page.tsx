@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { EXERCISE_COLUMNS, getMuscleGroups } from "@/lib/muscle-groups";
-import { muscleGroupName } from "@/lib/muscle-group-utils";
+import { muscleGroupName, UNCLASSIFIED_LABEL } from "@/lib/muscle-group-utils";
 import { createClient } from "@/lib/supabase/server";
 import type { Exercise } from "@/lib/types";
 
@@ -34,7 +34,7 @@ export default async function ProgressIndexPage() {
                   <div className="card row between">
                     <div>
                       <strong>{e.name}</strong>
-                      {e.muscle_group_id ? <div className="muted small">{muscleGroupName(groups, e.muscle_group_id)}</div> : null}
+                      <div className="muted small">{muscleGroupName(groups, e.muscle_group_id) ?? UNCLASSIFIED_LABEL}</div>
                     </div>
                     <span className="muted small">Ver ›</span>
                   </div>

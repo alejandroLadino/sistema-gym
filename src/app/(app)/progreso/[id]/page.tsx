@@ -7,7 +7,7 @@ import { requireUser } from "@/lib/auth";
 import { formatDate, formatKg, formatSet } from "@/lib/format";
 import { readDateRange } from "@/lib/search-params";
 import { EXERCISE_COLUMNS, getMuscleGroups } from "@/lib/muscle-groups";
-import { muscleGroupName } from "@/lib/muscle-group-utils";
+import { muscleGroupName, UNCLASSIFIED_LABEL } from "@/lib/muscle-group-utils";
 import { createClient } from "@/lib/supabase/server";
 import type { Exercise, SetValue } from "@/lib/types";
 import { isUuid } from "@/lib/validation";
@@ -62,7 +62,7 @@ export default async function ExerciseProgressPage({ params, searchParams }: Pag
         <div>
           <h1>{exercise.name}</h1>
           <div className="row small muted">
-            {exercise.muscle_group_id ? <span>{muscleGroupName(groups, exercise.muscle_group_id)}</span> : null}
+            <span>{muscleGroupName(groups, exercise.muscle_group_id) ?? UNCLASSIFIED_LABEL}</span>
             {exercise.archived_at ? <span className="badge">Archivado</span> : null}
           </div>
         </div>

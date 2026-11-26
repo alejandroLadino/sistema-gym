@@ -258,14 +258,48 @@ input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
   width: 100%; max-width: 640px; max-height: 88dvh; display: flex; flex-direction: column;
   background: var(--surface); border-radius: 20px 20px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
 }
-@media (min-width: 700px) { .sheet-backdrop { align-items: center; } .sheet { border-radius: 20px; } }
-.sheet-list { overflow-y: auto; margin: 12px -4px 0; padding: 0 4px; display: grid; gap: 6px; }
+/* Altura fija: la lista tiene scroll propio y el pie queda siempre visible. */
+.sheet.picker { height: 88dvh; gap: 10px; padding-bottom: 0; }
+@media (min-width: 700px) { .sheet-backdrop { align-items: center; } .sheet { border-radius: 20px; } .sheet.picker { height: min(88dvh, 760px); } }
+.picker-head h2 { margin: 0; outline: none; }
+
+/* Filtros por grupo: fila deslizable con objetivos de 44 px */
+.chips {
+  display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none;
+  margin: 0 -16px; padding: 2px 16px 4px; flex: none;
+}
+.chips::-webkit-scrollbar { display: none; }
+.chip-filter {
+  flex: none; min-height: 44px; padding: 0 16px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font: inherit; font-weight: 650; font-size: 0.92rem; white-space: nowrap; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.chip-filter[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
+.chip-filter:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 1px; }
+
+.picker-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: grid; align-content: start; gap: 6px; margin: 0 -4px; padding: 0 4px 12px; }
+.picker-empty { display: grid; gap: 10px; justify-items: center; padding: 24px 8px; }
+.picker-empty p { margin: 0; }
+.picker-foot {
+  flex: none; margin: 0 -16px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border); background: var(--surface);
+}
+.picker-form { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+.picker-form .picker-list { gap: 14px; padding-top: 4px; }
+.picker-form .picker-foot { display: grid; grid-template-columns: auto 1fr; gap: 8px; }
+.picker-form .picker-foot .btn { white-space: nowrap; padding: 0 12px; }
+
 .sheet-item {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
   min-height: 52px; padding: 8px 12px; text-align: left; border-radius: 12px;
   background: var(--surface-2); border: 1px solid transparent; color: var(--text); font: inherit; cursor: pointer;
 }
-.sheet-item:hover { border-color: var(--primary); }
+.sheet-item:hover:not(:disabled) { border-color: var(--primary); }
+.sheet-item:disabled { cursor: default; opacity: 0.7; }
+
+.field-error { color: var(--danger); font-size: 0.85rem; font-weight: 600; }
+select.input[aria-invalid="true"] { border-color: var(--danger); }
 
 /* --- Tablas simples --------------------------------------------------- */
 .table-wrap { overflow-x: auto; }

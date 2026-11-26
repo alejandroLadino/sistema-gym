@@ -30,3 +30,25 @@ describe("grupos musculares", () => {
     ]);
   });
 });
+
+describe("validación de ejercicios (grupo obligatorio)", () => {
+  it("exige nombre y un grupo del catálogo", async () => {
+    const { validateExerciseInput } = await import("./muscle-group-utils");
+    const ids = ["pecho", "espalda"];
+    expect(validateExerciseInput({ name: "  Press  ", muscle_group_id: "pecho" }, ids)).toEqual({
+      ok: true,
+      value: { name: "Press", muscle_group_id: "pecho" },
+    });
+    expect(validateExerciseInput({ name: "Press", muscle_group_id: "" }, ids)).toEqual({
+      ok: false,
+      errors: { muscle_group_id: "Selecciona un grupo muscular" },
+    });
+    expect(validateExerciseInput({ name: "Press", muscle_group_id: null }, ids).ok).toBe(false);
+    // Formato válido pero inexistente en el catálogo.
+    expect(validateExerciseInput({ name: "Press", muscle_group_id: "piernas" }, ids).ok).toBe(false);
+    expect(validateExerciseInput({ name: "", muscle_group_id: "pecho" }, ids)).toEqual({
+      ok: false,
+      errors: { name: "Escribe el nombre del ejercicio" },
+    });
+  });
+});
