@@ -53,3 +53,25 @@ export function formatSet(set: SetValue): string {
 export function formatSets(sets: SetValue[]): string {
   return sets.map(formatSet).join(" · ");
 }
+
+/**
+ * Resumen compacto: agrupa series consecutivas iguales.
+ * [40×10, 40×10, 40×8, 42,5×6] → "2 × 10 a 40 kg · 40 kg × 8 · 42,5 kg × 6"
+ * Peso corporal: [10, 10, 8] → "2 × 10 reps · 8 reps"
+ */
+export function summarizeSets(sets: SetValue[]): string {
+  const groups: { set: SetValue; count: number }[] = [];
+  for (const set of sets) {
+    const w = set.weight_kg === null || set.weight_kg === undefined ? null : Number(set.weight_kg);
+    const last = groups.at(-1);
+    if (last && last.set.reps === set.reps && last.set.weight_kg === w) last.count += 1;
+    else groups.push({ set: { reps: set.reps, weight_kg: w }, count: 1 });
+  }
+  return groups
+    .map(({ set, count }) => {
+      if (count === 1) return formatSet(set);
+      if (set.weight_kg === null) return `${count} × ${set.reps} reps`;
+      return `${count} × ${set.reps} a ${formatKg(set.weight_kg)} kg`;
+    })
+    .join(" · ");
+}
