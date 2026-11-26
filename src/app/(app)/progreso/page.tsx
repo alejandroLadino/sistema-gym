@@ -1,63 +1,40 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { EXERCISE_COLUMNS, getMuscleGroups } from "@/lib/muscle-groups";
-import { muscleGroupName, UNCLASSIFIED_LABEL } from "@/lib/muscle-group-utils";
+import { overviewSummary, type OverviewRow } from "@/lib/progress";
 import { createClient } from "@/lib/supabase/server";
 import type { Exercise } from "@/lib/types";
+import { ProgressList, type ProgressItem } from "./ProgressList";
 
 export const metadata: Metadata = { title: "Progreso" };
 
-export default async function ProgressIndexPage() {
+/** Lista de progreso: un resumen por ejercicio calculado en una sola consulta agrupada. */
+export default async function ProgressIndexPage({ searchParams }: PageProps<"/progreso">) {
   await requireUser();
   const supabase = await createClient();
-  const [{ data }, groups] = await Promise.all([
+  const [{ data: exercises }, { data: overview, error }, groups, params] = await Promise.all([
     supabase.from("exercises").select(EXERCISE_COLUMNS).order("name"),
+    supabase.rpc("get_progress_overview"),
     getMuscleGroups(),
+    searchParams,
   ]);
-  const exercises = (data ?? []) as Exercise[];
-  const active = exercises.filter((e) => !e.archived_at);
-  const archived = exercises.filter((e) => e.archived_at);
+
+  const summaries = new Map(((overview ?? []) as OverviewRow[]).map((r) => [r.exercise_id, overviewSummary(r)]));
+  const items: ProgressItem[] = ((exercises ?? []) as Exercise[]).map((e) => ({
+    id: e.id,
+    name: e.name,
+    groupId: e.muscle_group_id,
+    archived: Boolean(e.archived_at),
+    summary: summaries.get(e.id) ?? null,
+  }));
+
+  const q = typeof params.q === "string" ? params.q.slice(0, 80) : "";
+  const g = typeof params.grupo === "string" && groups.some((x) => x.id === params.grupo) ? params.grupo : "todos";
 
   return (
-    <div className="stack-lg">
-      <h1>Progreso</h1>
-      <p className="muted">Elige un ejercicio para ver sus series por fecha y la evolución de tu peso máximo.</p>
-      {exercises.length === 0 ? (
-        <div className="card empty">Aún no tienes ejercicios. Crea uno al registrar tu entrenamiento.</div>
-      ) : (
-        <>
-          <ul className="list">
-            {active.map((e) => (
-              <li key={e.id}>
-                <Link href={`/progreso/${e.id}`} className="link-card">
-                  <div className="card row between">
-                    <div>
-                      <strong>{e.name}</strong>
-                      <div className="muted small">{muscleGroupName(groups, e.muscle_group_id) ?? UNCLASSIFIED_LABEL}</div>
-                    </div>
-                    <span className="muted small">Ver ›</span>
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
-          {archived.length ? (
-            <details className="disclosure">
-              <summary>Archivados ({archived.length})</summary>
-              <ul className="list">
-                {archived.map((e) => (
-                  <li key={e.id}>
-                    <Link href={`/progreso/${e.id}`} className="link-card">
-                      <div className="card row between"><strong>{e.name}</strong><span className="badge">Archivado</span></div>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
-        </>
-      )}
-    </div>
+    <>
+      {error ? <p className="alert alert-error">No se pudo calcular tu progreso. Recarga la página.</p> : null}
+      <ProgressList items={items} groups={groups} initialQuery={q} initialGroup={g} />
+    </>
   );
 }

@@ -184,6 +184,70 @@ begin
   assert (public.get_workout_session('50000000-0000-0000-0000-000000000001') -> 'exercises' -> 1 ->> 'archived')::boolean,
     'La sesión muestra el ejercicio archivado';
 end $$;
+
+-- Resumen de progreso (lista de «Progreso») ------------------------------------
+-- Remo: 40×10,10,8 (20/11) → 40×10,10,10 (22/11) → 42,5×6 (22/11, segunda del día)
+-- → solo peso corporal (23/11, no comparable para un ejercicio con peso).
+insert into public.exercises (id, name, muscle_group_id) values
+  ('e0000000-0000-0000-0000-00000000000c', 'Remo con barra', 'espalda');
+select from public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000010", "session_date": "2026-11-20",
+  "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000c",
+    "sets": [{"reps": 10, "weight_kg": 40}, {"reps": 10, "weight_kg": 40}, {"reps": 8, "weight_kg": 40}]}]}'::jsonb);
+select from public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000011", "session_date": "2026-11-22",
+  "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000c",
+    "sets": [{"reps": 10, "weight_kg": 40}, {"reps": 10, "weight_kg": 40}, {"reps": 10, "weight_kg": 40}]}]}'::jsonb);
+do $$
+declare r record;
+begin
+  select * into r from public.get_progress_overview() where exercise_id = 'e0000000-0000-0000-0000-00000000000c';
+  assert r.uses_weight and r.session_count = 2 and r.last_session_date = '2026-11-22', format('Resumen Remo: %s', r);
+  assert r.recent -> 0 -> 'best_set' = '{"reps": 10, "weight_kg": 40.00}'::jsonb, format('Mejor serie: %s', r.recent);
+  assert (r.recent -> 0 ->> 'total_reps')::int = 30 and (r.recent -> 1 ->> 'total_reps')::int = 28,
+    'Reps totales 30 y 28';
+  assert r.recent -> 1 -> 'best_set' = '{"reps": 10, "weight_kg": 40.00}'::jsonb,
+    'Empate en peso: gana la serie con más reps (40×10, no 40×8)';
+end $$;
+
+select from public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000012", "session_date": "2026-11-22",
+  "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000c", "sets": [{"reps": 6, "weight_kg": 42.5}]}]}'::jsonb);
+select from public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000013", "session_date": "2026-11-23",
+  "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000c", "sets": [{"reps": 12, "weight_kg": null}]}]}'::jsonb);
+do $$
+declare r record;
+begin
+  select * into r from public.get_progress_overview() where exercise_id = 'e0000000-0000-0000-0000-00000000000c';
+  assert r.session_count = 4 and r.last_session_date = '2026-11-23'
+         and r.last_session_id = '50000000-0000-0000-0000-000000000013', 'La última sesión incluye la que no tiene peso';
+  assert jsonb_array_length(r.recent) = 2, 'Solo las dos últimas comparables';
+  assert r.recent -> 0 ->> 'session_id' = '50000000-0000-0000-0000-000000000012',
+    format('Dos sesiones el mismo día: la más reciente es la creada después (%s)', r.recent);
+  assert r.recent -> 1 ->> 'session_id' = '50000000-0000-0000-0000-000000000011', 'La anterior es la primera del 22/11';
+
+  -- Press de banca: 52,5×8 (26/11) frente a 45,5×9 (18/11).
+  select * into r from public.get_progress_overview() where exercise_id = 'e0000000-0000-0000-0000-00000000000a';
+  assert r.recent -> 0 -> 'best_set' = '{"reps": 8, "weight_kg": 52.50}'::jsonb
+     and r.recent -> 1 -> 'best_set' = '{"reps": 9, "weight_kg": 45.50}'::jsonb, format('Press: %s', r.recent);
+
+  -- Dominadas (peso corporal, archivado): una sola sesión, mejor serie = más reps.
+  select * into r from public.get_progress_overview() where exercise_id = 'e0000000-0000-0000-0000-00000000000b';
+  assert not r.uses_weight and jsonb_array_length(r.recent) = 1
+     and r.recent -> 0 -> 'best_set' = '{"reps": 10, "weight_kg": null}'::jsonb, format('Dominadas: %s', r);
+end $$;
+reset role;
+
+select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
+set role authenticated;
+do $$
+begin
+  assert not exists (select 1 from public.get_progress_overview()), 'El resumen de progreso es privado';
+end $$;
+reset role;
+
+-- Limpieza del escenario de Remo (las pruebas siguientes cuentan las sesiones de Ana).
+delete from public.workout_sessions where id::text like '50000000-0000-0000-0000-00000000001_';
+delete from public.exercises where id = 'e0000000-0000-0000-0000-00000000000c';
+select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
 reset role;
 
 -- 3. Beto no ve ni toca nada de Ana --------------------------------------------
