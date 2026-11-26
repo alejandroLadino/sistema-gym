@@ -1141,6 +1141,201 @@ test("Historial: filtros, búsqueda, meses y volver con los filtros (375 px)", a
   await context.close();
 });
 
+test("Sesiones: quitar el último ejercicio y «Última vez» tras repetir (375 px)", async ({ browser }) => {
+  const userE = { email: `eva.${run}@example.com`, temp: "Temporal321", final: "EvaSegura654" };
+  const admin = await newPage(browser);
+  await login(admin, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await admin.goto("/admin");
+  const form = admin.getByRole("form", { name: "Crear cuenta" });
+  await form.getByLabel("Correo").fill(userE.email);
+  await form.getByLabel("Contraseña inicial").fill(userE.temp);
+  await form.getByRole("button", { name: "Crear cuenta" }).click();
+  await expect(form.getByText(`Cuenta creada para ${userE.email}`)).toBeVisible();
+  await admin.context().close();
+
+  const context = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  page.on("dialog", (d) => d.accept());
+  await login(page, userE.email, userE.temp);
+  await page.getByLabel("Nueva contraseña", { exact: true }).fill(userE.final);
+  await page.getByLabel("Repite la nueva contraseña").fill(userE.final);
+  await page.getByRole("button", { name: "Guardar contraseña" }).click();
+  await expect(page).toHaveURL(/\/$/);
+
+  const status = page.locator(".save-status");
+  const cards = page.locator(".exercise-card");
+  const quitar = async (name: string) => {
+    await page.getByRole("button", { name: `Acciones de ${name}` }).click();
+    await page.getByRole("menuitem", { name: "Quitar de la sesión" }).click();
+  };
+  const quick = async (name: string, reps: string, weight: string) => {
+    const card = page.getByRole("region", { name });
+    await card.getByLabel(`Repeticiones por serie de ${name}`).fill(reps);
+    await card.getByLabel(`Peso por serie de ${name}`, { exact: false }).fill(weight);
+    await card.getByRole("button", { name: "Agregar 3 series" }).click();
+  };
+
+  // 1) En curso: quitar el único ejercicio deja la sesión vacía EN EL SERVIDOR.
+  await page.goto("/entrenar");
+  const ownerId = await page.evaluate(() => JSON.parse(localStorage.getItem("sistema-gym:borrador-nuevo") ?? "{}").ownerId as string);
+  expect(ownerId).toBeTruthy();
+  await addExercise(page, "Curl E", { create: true, muscle: "Bíceps" });
+  await quick("Curl E", "10", "12");
+  await saved(page);
+  const enCursoId = page.url().split("/").pop()!;
+  await quitar("Curl E");
+  await expect(cards).toHaveCount(0);
+  await expect(status).toHaveText("Sin guardar");
+  await saved(page);
+  await page.reload();
+  await expect(page.getByText("Agrega tu primer ejercicio para empezar")).toBeVisible();
+  await expect(cards).toHaveCount(0);
+  await expect(page.getByText("Recuperamos cambios")).toHaveCount(0);
+  // Otro navegador ve lo mismo (lo confirmado por el servidor, sin copia local).
+  const otro = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+  const otraPagina = await otro.newPage();
+  await login(otraPagina, userE.email, userE.final);
+  await otraPagina.goto(`/sesiones/${enCursoId}`);
+  await expect(otraPagina.getByText("Agrega tu primer ejercicio para empezar")).toBeVisible();
+  await expect(otraPagina.locator(".exercise-card")).toHaveCount(0);
+  await otraPagina.goto("/historial");
+  await expect(otraPagina.locator(`a[href="/sesiones/${enCursoId}"]`)).toContainText("0 ejercicios · 0 series");
+  await expect(otraPagina.locator(`a[href="/sesiones/${enCursoId}"]`)).toContainText("En curso");
+  // No se puede finalizar vacía.
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page.locator(".alert-error")).toHaveText("Agrega al menos un ejercicio para finalizar la sesión.");
+  await expect(page).toHaveURL(new RegExp(`/sesiones/${enCursoId}$`));
+  await shot(page, "16a-en-curso-vacia");
+  // Se retoma: agregar un ejercicio y finalizar.
+  await addExercise(page, "Curl E");
+  await quick("Curl E", "10", "12");
+  await saved(page);
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial/);
+
+  // 2) Finalizada con un solo ejercicio: cancelar, reemplazar (cancelado y aplicado) y eliminar.
+  await page.goto(`/sesiones/${enCursoId}`);
+  await expect(page.getByText("Finalizada", { exact: true })).toBeVisible();
+  await quitar("Curl E");
+  const dialogo = page.getByRole("dialog", { name: "Esta sesión necesita al menos un ejercicio" });
+  await expect(dialogo).toBeVisible();
+  await shot(page, "16b-finalizada-ultimo-ejercicio");
+  await dialogo.getByRole("button", { name: "Cancelar" }).click();
+  await expect(dialogo).toBeHidden();
+  await expect(cards).toHaveCount(1);
+  await expect(status).toHaveText("Guardado");
+  // Reemplazar y cerrar el selector sin elegir: intacta.
+  await quitar("Curl E");
+  await dialogo.getByRole("button", { name: "Reemplazar ejercicio" }).click();
+  const picker = page.getByRole("dialog", { name: "Reemplazar ejercicio" });
+  await expect(picker.getByText("Se quitará «Curl E» y sus 3 series registradas")).toBeVisible();
+  await picker.getByRole("button", { name: "Cerrar" }).click();
+  await expect(cards).toHaveCount(1);
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Curl E" }).locator(".ex-summary")).toHaveText("3 series · Mejor serie: 12 kg × 10");
+  // Reemplazar de verdad, creando el ejercicio desde el mismo selector.
+  await quitar("Curl E");
+  await dialogo.getByRole("button", { name: "Reemplazar ejercicio" }).click();
+  await picker.getByLabel("Buscar ejercicio").fill("Martillo E");
+  await picker.locator(".picker-foot").getByRole("button", { name: "Crear ejercicio" }).click();
+  await page.getByRole("dialog").getByLabel("Grupo muscular").selectOption({ label: "Bíceps" });
+  await page.getByRole("dialog").getByRole("button", { name: "Crear y agregar a la sesión" }).click();
+  await expect(page.getByRole("region", { name: "Martillo E" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Curl E" })).toHaveCount(0);
+  await expect(status).toHaveText("Sin guardar");
+  await saved(page);
+  await otraPagina.goto(`/sesiones/${enCursoId}`);
+  await expect(otraPagina.getByRole("region", { name: "Martillo E" })).toBeVisible();
+  await expect(otraPagina.getByRole("region", { name: "Curl E" })).toHaveCount(0);
+  await otraPagina.goto("/historial");
+  await expect(otraPagina.locator(`a[href="/sesiones/${enCursoId}"]`)).toContainText("Martillo E");
+  await expect(otraPagina.locator(`a[href="/sesiones/${enCursoId}"]`)).toContainText("1 ejercicio · 0 series");
+  await otraPagina.goto("/progreso");
+  await expect(otraPagina.getByRole("list", { name: "Ejercicios con registros" })).toHaveCount(0);
+  await otraPagina.getByText("Sin registros (2)").click();
+  await expect(otraPagina.getByRole("list", { name: "Ejercicios sin registros" })).toContainText("Curl E");
+
+  // Eliminar: si el servidor falla, no se informa éxito y la sesión sigue.
+  await page.route("**/*", (route) =>
+    route.request().method() === "POST" && route.request().headers()["next-action"]
+      ? route.fulfill({ status: 500, body: "fallo simulado" })
+      : route.continue(),
+  );
+  await quitar("Martillo E");
+  await dialogo.getByRole("button", { name: "Eliminar sesión" }).click();
+  await expect(page.locator(".alert-error")).toContainText("La sesión no se eliminó");
+  await expect(page).toHaveURL(new RegExp(`/sesiones/${enCursoId}$`));
+  await page.unroute("**/*");
+  await quitar("Martillo E");
+  await dialogo.getByRole("button", { name: "Eliminar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial/);
+  await expect(page.getByText("Sesión eliminada.")).toBeVisible();
+  await expect(page.getByText("Todavía no tienes sesiones.")).toBeVisible();
+  await otraPagina.goto(`/sesiones/${enCursoId}`);
+  await expect(otraPagina.getByRole("heading", { name: "No encontrado" })).toBeVisible();
+
+  // 3) «Última vez» salta la copia sin series creada con «Repetir ejercicios».
+  const original = isoDaysAgo(3);
+  await page.goto("/entrenar");
+  await page.getByLabel("Fecha del entrenamiento").fill(original);
+  await addExercise(page, "Remo E", { create: true, muscle: "Espalda" });
+  await quick("Remo E", "12", "30");
+  await saved(page);
+  const remoId = page.url().split("/").pop()!;
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial/);
+  await page.goto("/");
+  await page.locator(".recent-card").filter({ hasText: "Espalda" }).getByRole("button", { name: /Repetir ejercicios/ }).click();
+  await expect(page).toHaveURL(/\/sesiones\/[0-9a-f-]+/);
+  await expect(page.getByText("Sesión nueva con los ejercicios del")).toBeVisible();
+  // Sesión posterior (mañana) con Remo E.
+  await page.goto("/entrenar");
+  await page.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(-1));
+  await addExercise(page, "Remo E");
+  const remo = page.getByRole("region", { name: "Remo E" });
+  await expect(remo.getByText("Última vez")).toBeVisible();
+  await expect(remo.locator(".previous-line a")).toHaveAttribute("href", `/sesiones/${remoId}`);
+  await expect(remo.locator(".previous-summary")).toHaveText("3 × 12 a 30 kg");
+  await shot(page, "16c-ultima-vez-tras-repetir");
+  await remo.getByRole("button", { name: "Copiar última sesión" }).click();
+  await expect(remo.getByLabel(/^Peso serie \d+ de Remo E/)).toHaveCount(3);
+  for (const n of [1, 2, 3]) {
+    await expect(page.getByLabel(`Peso serie ${n} de Remo E`, { exact: false })).toHaveValue("30");
+    await expect(page.getByLabel(`Repeticiones serie ${n} de Remo E`)).toHaveValue("12");
+  }
+  await expect(status).toHaveText("Sin guardar");
+  await saved(page);
+
+  // 4) Copia local vacía y antigua frente a una sesión finalizada: se muestra la del servidor.
+  const copia = (exercises: unknown[]) => ({
+    ownerId,
+    dirty: true,
+    savedOnce: true,
+    draft: { id: remoId, date: original, notes: "", exercises, editedAt: Date.now() + 60_000 },
+  });
+  await page.evaluate(([k, v]) => localStorage.setItem(k, v), [`sistema-gym:borrador:${remoId}`, JSON.stringify(copia([]))]);
+  await page.goto(`/sesiones/${remoId}`);
+  await expect(page.getByText("había una copia sin ejercicios")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Remo E" }).locator(".ex-summary")).toHaveText("3 series · Mejor serie: 30 kg × 12");
+  await expect(status).toHaveText("Guardado");
+  await shot(page, "16d-copia-local-vacia");
+  await page.getByRole("button", { name: "Descartar copia local" }).click();
+  await expect(page.getByText("Copia local descartada.")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("había una copia sin ejercicios")).toHaveCount(0);
+  // Una copia local válida (serie editada antes de recargar) sí se recupera y se guarda.
+  await expand(page, "Remo E");
+  await page.getByLabel("Repeticiones serie 1 de Remo E").fill("9");
+  await page.reload(); // antes del autoguardado
+  await expect(page.getByText("Recuperamos cambios que no se habían guardado")).toBeVisible();
+  await saved(page);
+  await otraPagina.goto(`/sesiones/${remoId}`);
+  await expand(otraPagina, "Remo E");
+  await expect(otraPagina.getByLabel("Repeticiones serie 1 de Remo E")).toHaveValue("9");
+  await otro.close();
+  await context.close();
+});
+
 test("cuenta B no accede a los datos de A, ni por URL directa", async ({ browser }) => {
   const page = await newPage(browser);
   await login(page, userB.email, userB.temp);

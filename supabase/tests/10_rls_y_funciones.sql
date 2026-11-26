@@ -336,6 +336,78 @@ end $$;
 delete from public.workout_sessions where id = '50000000-0000-0000-0000-000000000003';
 reset role;
 
+-- Sesiones vacías y «Última vez» -----------------------------------------------------
+-- 004 (10/11): Press con decimales y una serie sin peso; 005 (12/11): Press sin series
+-- (como «Repetir ejercicios»); 006: sesión que se vacía.
+select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select from public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000004", "session_date": "2026-11-10",
+  "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a",
+    "sets": [{"reps": 12, "weight_kg": 40}, {"reps": 10, "weight_kg": 42.75}, {"reps": 15, "weight_kg": null}]}]}'::jsonb);
+select from public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000005", "session_date": "2026-11-12",
+  "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a", "sets": []}]}'::jsonb);
+do $$
+declare r record; ok boolean;
+begin
+  -- La sesión sin series se salta: la referencia es la del 10/11, con orden, decimales y peso corporal.
+  select * into r from public.get_previous_exercise_sets(array['e0000000-0000-0000-0000-00000000000a']::uuid[], '2026-11-15', null);
+  assert r.session_id = '50000000-0000-0000-0000-000000000004' and r.session_date = '2026-11-10',
+    format('«Última vez» debe saltar la sesión sin series: %s', row_to_json(r));
+  assert r.sets = '[{"reps": 12, "weight_kg": 40.00}, {"reps": 10, "weight_kg": 42.75}, {"reps": 15, "weight_kg": null}]'::jsonb,
+    format('Series de referencia exactas: %s', r.sets);
+  -- Excluir la sesión en edición y no hay otra con series antes → sin historial.
+  assert not exists (select 1 from public.get_previous_exercise_sets(
+    array['e0000000-0000-0000-0000-00000000000a']::uuid[], '2026-11-15', '50000000-0000-0000-0000-000000000004')),
+    'Sin sesión anterior con series → sin historial';
+  -- Solo la sesión vacía antes de la fecha → sin historial.
+  assert not exists (select 1 from public.get_previous_exercise_sets(
+    array['e0000000-0000-0000-0000-00000000000a']::uuid[], '2026-11-13', '50000000-0000-0000-0000-000000000004')),
+    'Una sesión sin series no es referencia';
+  -- Orden cronológico intacto: con fecha posterior gana la más reciente con series (26/11 > 18/11 > 10/11).
+  assert (select session_date from public.get_previous_exercise_sets(
+    array['e0000000-0000-0000-0000-00000000000a']::uuid[], '2030-01-01', null)) = '2026-11-26', 'La más reciente con series';
+
+  -- Una sesión en curso puede quedar vacía en el servidor y retomarse.
+  perform public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000006", "session_date": "2026-11-27",
+    "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a", "sets": [{"reps": 5, "weight_kg": 20}]}]}'::jsonb);
+  perform public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000006", "session_date": "2026-11-27", "exercises": []}'::jsonb);
+  assert (select count(*) from public.session_exercises where session_id = '50000000-0000-0000-0000-000000000006') = 0,
+    'La sesión en curso queda vacía';
+  assert jsonb_array_length(public.get_workout_session('50000000-0000-0000-0000-000000000006') -> 'exercises') = 0, 'Detalle vacío';
+
+  -- No se puede finalizar vacía.
+  ok := false;
+  begin
+    perform public.finish_workout_session('50000000-0000-0000-0000-000000000006');
+  exception when check_violation then ok := true;
+  end;
+  assert ok, 'Finalizar exige al menos un ejercicio';
+  assert (select finished_at is null from public.workout_sessions where id = '50000000-0000-0000-0000-000000000006'), 'Sigue en curso';
+
+  -- Retomar: agregar un ejercicio y finalizar.
+  perform public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000006", "session_date": "2026-11-27",
+    "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a", "sets": [{"reps": 6, "weight_kg": 20}]}]}'::jsonb);
+  perform public.finish_workout_session('50000000-0000-0000-0000-000000000006');
+
+  -- Finalizada: vaciarla se rechaza y los datos quedan intactos.
+  ok := false;
+  begin
+    perform public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000006", "session_date": "2026-11-27", "exercises": []}'::jsonb);
+  exception when check_violation then ok := true;
+  end;
+  assert ok, 'Una sesión finalizada no puede quedar vacía';
+  assert (select count(*) from public.exercise_sets es join public.session_exercises se on se.id = es.session_exercise_id
+          where se.session_id = '50000000-0000-0000-0000-000000000006') = 1, 'El rechazo no tocó los datos';
+  -- Finalizada: reemplazar el ejercicio (sin series) sí se acepta.
+  perform public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000006", "session_date": "2026-11-27",
+    "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000b", "sets": []}]}'::jsonb);
+  assert (select exercise_id from public.session_exercises where session_id = '50000000-0000-0000-0000-000000000006')
+         = 'e0000000-0000-0000-0000-00000000000b', 'Reemplazo aplicado';
+end $$;
+delete from public.workout_sessions where id in ('50000000-0000-0000-0000-000000000004',
+  '50000000-0000-0000-0000-000000000005', '50000000-0000-0000-0000-000000000006');
+reset role;
+
 select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
 set role authenticated;
 do $$
@@ -355,7 +427,7 @@ begin
   assert (select finished_at is null from public.workout_sessions where id = '50000000-0000-0000-0000-000000000001'),
     'El intento ajeno no tuvo efecto';
 end $$;
-\echo '   Estado de sesión, Inicio e Historial: OK'
+\echo '   Estado de sesión, Inicio, Historial, sesiones vacías y «Última vez»: OK'
 
 -- 3. Beto no ve ni toca nada de Ana --------------------------------------------
 select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');

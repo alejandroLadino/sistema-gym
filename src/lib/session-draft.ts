@@ -78,7 +78,8 @@ export function draftToPayload(
   const errors: DraftErrors = { sets: {} };
 
   if (!isIsoDate(draft.date)) errors.general = "Elige una fecha válida.";
-  if (draft.exercises.length === 0) errors.general ??= "Agrega al menos un ejercicio.";
+  // Sin ejercicios también es válido: una sesión en curso puede quedar vacía en el
+  // servidor. Finalizar exige al menos uno (editor y base de datos).
 
   const exercises = draft.exercises.map((ex) => {
     const sets: SetValue[] = [];
@@ -192,6 +193,20 @@ const PREFIX = "sistema-gym:borrador:";
 const NEW_POINTER = "sistema-gym:borrador-nuevo";
 
 export type StoredDraft = { draft: Draft; dirty: boolean; savedOnce: boolean; ownerId: string };
+
+/**
+ * Qué mostrar al abrir una sesión guardada que también tiene copia local:
+ *  - "server": no hay cambios locales más nuevos que el servidor;
+ *  - "local": cambios locales válidos más nuevos (se recuperan y se guardan);
+ *  - "conflict": la copia local está vacía pero la sesión guardada está finalizada y
+ *    tiene ejercicios. El servidor no acepta vaciarla, así que se muestra su versión
+ *    y se ofrece descartar la copia.
+ */
+export function resolveStoredDraft(initial: SessionData, stored: StoredDraft | null): "server" | "local" | "conflict" {
+  if (!stored?.dirty || stored.draft.editedAt <= Date.parse(initial.updated_at)) return "server";
+  if (initial.finished_at && stored.draft.exercises.length === 0 && initial.exercises.length > 0) return "conflict";
+  return "local";
+}
 
 export function draftStorageKey(id: string) {
   return PREFIX + id;

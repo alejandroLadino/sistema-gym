@@ -1,7 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { getActionUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { isIsoDate } from "@/lib/format";
@@ -10,12 +8,17 @@ import type { ActionResult, PreviousSets } from "@/lib/types";
 import { isUuid, MAX_REPS, MAX_WEIGHT_KG, normalizeSearch } from "@/lib/validation";
 import { MAX_QUERY_LENGTH, type HistoryCursor, type HistorySession } from "@/lib/history";
 
+const FINISHED_NEEDS_EXERCISE =
+  "Una sesión finalizada necesita al menos un ejercicio. Reemplázalo o elimina la sesión.";
+const FINISH_NEEDS_EXERCISE = "Agrega al menos un ejercicio para finalizar la sesión.";
+
 const NO_ACCESS = "Tu sesión expiró o tu cuenta no tiene acceso. Vuelve a iniciar sesión; lo capturado se conserva en este dispositivo.";
 
 function isValidPayload(p: SessionPayload): boolean {
   if (!p || !isUuid(p.id) || !isIsoDate(p.session_date)) return false;
   if (p.notes !== null && (typeof p.notes !== "string" || p.notes.length > 2000)) return false;
-  if (!Array.isArray(p.exercises) || p.exercises.length === 0 || p.exercises.length > 50) return false;
+  // Sin ejercicios es válido para una sesión en curso; la base rechaza vaciar una finalizada.
+  if (!Array.isArray(p.exercises) || p.exercises.length > 50) return false;
   return p.exercises.every(
     (e) =>
       isUuid(e.exercise_id) &&
@@ -42,6 +45,7 @@ export async function saveSession(payload: SessionPayload): Promise<ActionResult
   if (error || !data) {
     if (error?.code === "42501") return { ok: false, error: NO_ACCESS };
     if (error?.code === "23503") return { ok: false, error: "Uno de los ejercicios ya no existe en tu catálogo." };
+    if (error?.code === "23514") return { ok: false, error: FINISHED_NEEDS_EXERCISE };
     return { ok: false, error: "No se pudo guardar. Revisa tu conexión y reintenta." };
   }
   // Sin revalidatePath: invalidar la caché hace que Next vuelva a renderizar la ruta
@@ -74,15 +78,20 @@ export async function getPreviousSets(
   return { ok: true, data: result };
 }
 
-export async function deleteSession(formData: FormData) {
-  if (!(await getActionUser())) redirect("/login");
-  const id = formData.get("id");
-  if (!isUuid(id)) return;
+/**
+ * Elimina una sesión propia. Solo informa éxito si la base confirma que se borró
+ * (RLS devuelve 0 filas si no existe o no es tuya).
+ */
+export async function deleteSession(id: string): Promise<ActionResult> {
+  if (!(await getActionUser())) return { ok: false, error: NO_ACCESS };
+  if (!isUuid(id)) return { ok: false, error: "Sesión inválida." };
   const supabase = await createClient();
-  await supabase.from("workout_sessions").delete().eq("id", id);
-  revalidatePath("/historial");
-  revalidatePath("/");
-  redirect("/historial?eliminada=1");
+  const { data, error } = await supabase.from("workout_sessions").delete().eq("id", id).select("id");
+  if (error) return { ok: false, error: "No se pudo eliminar la sesión. Revisa tu conexión y reintenta." };
+  if (!data?.length) return { ok: false, error: "La sesión ya no existe o no te pertenece." };
+  // Sin revalidatePath: refrescar la ruta actual remontaría el editor de la sesión
+  // borrada (404) antes de salir. Inicio e Historial se cargan frescos al navegar.
+  return { ok: true };
 }
 
 /** Marca la sesión como finalizada. Idempotente: repetirlo conserva la primera fecha. */
@@ -93,6 +102,7 @@ export async function finishSession(id: string): Promise<ActionResult> {
   const { error } = await supabase.rpc("finish_workout_session", { p_session_id: id });
   if (error) {
     if (error.code === "42501") return { ok: false, error: NO_ACCESS };
+    if (error.code === "23514") return { ok: false, error: FINISH_NEEDS_EXERCISE };
     return { ok: false, error: "No se pudo finalizar la sesión. Revisa tu conexión y reintenta." };
   }
   return { ok: true };

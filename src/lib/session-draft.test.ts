@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { copyPreviousSets, draftToPayload, nextSet, sessionToDraft, type Draft } from "./session-draft";
+import { copyPreviousSets, draftToPayload, nextSet, resolveStoredDraft, sessionToDraft, type Draft, type StoredDraft } from "./session-draft";
+import type { SessionData } from "./types";
 import { formatDate, formatSet, isIsoDate, todayLocal } from "./format";
 import { uuidv4 } from "./uuid";
 
@@ -42,12 +43,57 @@ describe("draftToPayload", () => {
     });
   });
 
-  it("señala series incompletas y sesiones vacías", () => {
+  it("señala series incompletas", () => {
     const bad = draftToPayload(base([{ key: "a", exerciseId: "x", name: "X", sets: [{ key: "1", reps: "", weight: "40" }] }]));
     expect(bad.ok).toBe(false);
     if (!bad.ok) expect(bad.errors.sets["1"]).toMatch(/repeticiones/i);
-    const empty = draftToPayload(base([]));
-    expect(empty.ok).toBe(false);
+  });
+
+  it("una sesión sin ejercicios se puede guardar (en curso); la fecha sigue siendo obligatoria", () => {
+    expect(draftToPayload(base([]))).toEqual({
+      ok: true,
+      payload: { id: "50000000-0000-4000-8000-000000000001", session_date: "2026-11-26", notes: null, exercises: [] },
+    });
+    expect(draftToPayload({ ...base([]), date: "" }).ok).toBe(false);
+  });
+});
+
+describe("copia local frente a la versión del servidor", () => {
+  const session = (finished: boolean, exercises = 1): SessionData => ({
+    id: "50000000-0000-4000-8000-000000000001",
+    session_date: "2026-11-26",
+    notes: null,
+    updated_at: "2026-11-26T10:00:00Z",
+    finished_at: finished ? "2026-11-26T10:00:00Z" : null,
+    exercises: Array.from({ length: exercises }, (_, i) => ({
+      exercise_id: `e${i}`, name: `E${i}`, muscle_group: null, archived: false, sets: [{ reps: 10, weight_kg: 40 }],
+    })),
+  });
+  const stored = (exercises: number, editedAt: number, dirty = true): StoredDraft => ({
+    ownerId: "u",
+    savedOnce: true,
+    dirty,
+    draft: {
+      ...base(Array.from({ length: exercises }, (_, i) => ({ key: `k${i}`, exerciseId: `e${i}`, name: `E${i}`, sets: [] }))),
+      editedAt,
+    },
+  });
+  const later = Date.parse("2026-11-26T11:00:00Z");
+  const earlier = Date.parse("2026-11-26T09:00:00Z");
+
+  it("sin copia, copia antigua o ya guardada → servidor", () => {
+    expect(resolveStoredDraft(session(true), null)).toBe("server");
+    expect(resolveStoredDraft(session(true), stored(1, earlier))).toBe("server");
+    expect(resolveStoredDraft(session(true), stored(1, later, false))).toBe("server");
+  });
+  it("cambios locales válidos y más nuevos se recuperan (p. ej., una serie editada)", () => {
+    expect(resolveStoredDraft(session(true), stored(1, later))).toBe("local");
+    // En curso, quitar el último ejercicio es un cambio válido pendiente de guardar.
+    expect(resolveStoredDraft(session(false), stored(0, later))).toBe("local");
+  });
+  it("copia vacía que contradice una sesión finalizada con ejercicios → conflicto", () => {
+    expect(resolveStoredDraft(session(true), stored(0, later))).toBe("conflict");
+    expect(resolveStoredDraft(session(true, 0), stored(0, later))).toBe("local");
   });
 });
 
