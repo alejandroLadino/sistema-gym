@@ -16,6 +16,8 @@ export type ExerciseFormState = {
   fieldErrors?: ExerciseFieldErrors;
   /** Lo enviado, para no perderlo cuando el servidor rechaza el formulario. */
   values?: ExerciseFormValues;
+  /** Id del ejercicio creado o editado (para «Ver ejercicio»). */
+  exerciseId?: string;
 };
 
 function formValues(formData: FormData): ExerciseFormValues {
@@ -53,13 +55,17 @@ export async function createExercise(_prev: ExerciseFormState, formData: FormDat
   if (!res.ok) return { error: CHECK_FIELDS, fieldErrors: res.errors, values: formValues(formData) };
 
   const supabase = await createClient();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("exercises")
-    .insert({ ...res.value, notes: cleanText(formData.get("notes"), 1000) });
-  if (error) return { ...dbError(error.code, "No se pudo crear el ejercicio."), values: formValues(formData) };
+    .insert({ ...res.value, notes: cleanText(formData.get("notes"), 1000) })
+    .select("id")
+    .single<{ id: string }>();
+  if (error || !data) {
+    return { ...dbError(error?.code, "No se pudo crear el ejercicio. Revisa tu conexión y reintenta."), values: formValues(formData) };
+  }
 
   revalidatePath("/ejercicios");
-  return { message: `«${res.value.name}» agregado a tu catálogo.` };
+  return { message: `«${res.value.name}» agregado a tu catálogo.`, exerciseId: data.id };
 }
 
 /** Creación desde el modal «Agregar ejercicio» de la sesión. */
@@ -91,12 +97,14 @@ export async function updateExercise(_prev: ExerciseFormState, formData: FormDat
     .update({ ...res.value, notes: cleanText(formData.get("notes"), 1000) })
     .eq("id", id)
     .select("id");
-  if (error) return { ...dbError(error.code, "No se pudo guardar."), values: formValues(formData) };
+  if (error) {
+    return { ...dbError(error.code, "No se pudo guardar. Revisa tu conexión y reintenta."), values: formValues(formData) };
+  }
   if (!data?.length) return { error: "Ejercicio no encontrado." };
 
   revalidatePath("/ejercicios");
   revalidatePath(`/ejercicios/${id}`);
-  return { message: "Cambios guardados." };
+  return { message: "Cambios guardados.", exerciseId: id };
 }
 
 export async function setExerciseArchived(formData: FormData) {
@@ -115,4 +123,30 @@ export async function setExerciseArchived(formData: FormData) {
   }
   revalidatePath("/ejercicios");
   revalidatePath(`/ejercicios/${id}`);
+}
+
+/** Archivar o restaurar desde el catálogo: devuelve el resultado en vez de redirigir. */
+export async function archiveExercise(
+  id: string,
+  archive: boolean,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!(await getActionUser())) return { ok: false, error: NO_ACCESS };
+  if (!isUuid(id)) return { ok: false, error: "Ejercicio inválido." };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("exercises")
+    .update({ archived_at: archive ? new Date().toISOString() : null })
+    .eq("id", id)
+    .select("id");
+  if (error) {
+    if (error.code === "23505") {
+      return { ok: false, error: "Ya tienes un ejercicio activo con este nombre. Renombra uno de los dos para restaurarlo." };
+    }
+    return { ok: false, error: "No se pudo guardar. Revisa tu conexión y reintenta." };
+  }
+  if (!data?.length) return { ok: false, error: "Ejercicio no encontrado." };
+  revalidatePath("/ejercicios");
+  revalidatePath(`/ejercicios/${id}`);
+  return { ok: true };
 }
