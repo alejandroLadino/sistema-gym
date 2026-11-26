@@ -71,6 +71,13 @@ ambas sesiones. Para peso corporal se muestran repeticiones en el historial.
 - Las plantillas, los entrenadores, las membresías, los pagos y los planes
   de alimentación quedan para fases posteriores.
 
+## Idioma
+
+- Responder siempre en español al usuario, aunque el mensaje, una herramienta o
+  una página consultada estén en otro idioma.
+- La interfaz, los mensajes de la app, los commits, los pull requests y la
+  documentación del proyecto también se escriben en español.
+
 ## Notas técnicas (implementación)
 
 - Next.js (App Router) + TypeScript en `src/`, Supabase Auth + Postgres.
