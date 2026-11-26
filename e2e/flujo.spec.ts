@@ -294,22 +294,23 @@ test("cuenta A: días después reutiliza el ejercicio y copia la última sesión
   await expect(page).toHaveURL(/\/progreso\/[0-9a-f-]{36}/);
   pressId = page.url().split("/").pop()!.split("?")[0];
   await expect(page.getByRole("img", { name: /Peso máximo por sesión/ })).toBeVisible();
-  await expect(page.locator("table.data tbody tr")).toHaveCount(2);
-  await expect(page.locator("table.data")).toContainText("42,5 kg × 6");
-  await expect(page.locator("table.data")).toContainText("45 kg × 6");
+  const series = page.locator(".history-item");
+  await expect(series).toHaveCount(2);
+  await expect(series.first()).toContainText("45 kg × 6");
+  await expect(series.nth(1)).toContainText("42,5 kg × 6");
   await shot(page, "08-progreso");
 
-  // Filtro por fechas: solo la sesión antigua.
+  // Rango personalizado: solo la sesión antigua.
+  await page.getByRole("group", { name: "Período" }).getByRole("button", { name: "Personalizado" }).click();
   await page.getByLabel("Hasta").fill(isoDaysAgo(3));
-  await page.getByRole("button", { name: "Filtrar" }).click();
-  await expect(page.locator("table.data tbody tr")).toHaveCount(1);
+  await expect(series).toHaveCount(1);
 
   // Peso corporal: se muestran repeticiones.
   await page.goto("/progreso");
   await page.getByRole("link", { name: /Dominadas/ }).click();
-  await expect(page.getByRole("img", { name: /Repeticiones máximas/ })).toBeVisible();
-  await expect(page.locator("table.data")).toContainText("10 reps");
-  await expect(page.locator("table.data")).toContainText("18 reps");
+  await expect(page.getByRole("img", { name: /Mejor serie por sesión/ })).toBeVisible();
+  await expect(series.first()).toContainText("10 reps");
+  await expect(series.first()).toContainText("18 reps totales");
   await shot(page, "09-progreso-peso-corporal");
   await page.context().close();
 });
@@ -561,6 +562,145 @@ test("cuenta A: corrige una sesión anterior desde el historial", async ({ brows
   await page.context().close();
 });
 
+test("cuenta A: Progreso: lista, detalle, métricas, rangos y correcciones", async ({ browser }) => {
+  const page = await newPage(browser);
+  await login(page, userA.email, userA.final);
+
+  // Sesión 1 (hace 10 días): Remo 40 kg × 10, 10, 8.
+  await page.getByRole("link", { name: "Registrar entrenamiento" }).click();
+  await page.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(10));
+  await addExercise(page, "Remo con barra", { create: true, muscle: "Espalda" });
+  const remo = page.getByRole("region", { name: "Remo con barra" });
+  await remo.getByLabel("Repeticiones por serie de Remo con barra").fill("10");
+  await remo.getByLabel("Peso por serie de Remo con barra", { exact: false }).fill("40");
+  await remo.getByRole("button", { name: "Agregar 3 series" }).click();
+  await page.getByLabel("Repeticiones serie 3 de Remo con barra").fill("8");
+  await saved(page);
+
+  // Sesión 2 (hace 5 días): copia de la anterior (40 × 10, 10, 8).
+  await page.goto("/entrenar");
+  await page.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(5));
+  await addExercise(page, "Remo con barra");
+  await remo.getByRole("button", { name: "Copiar última sesión" }).click();
+  await saved(page);
+  const session2 = page.url().split("/").pop()!;
+
+  // Lista: búsqueda + grupo combinados; orden por última sesión.
+  await page.getByRole("navigation").getByRole("link", { name: "Progreso" }).click();
+  const conRegistros = page.getByRole("list", { name: "Ejercicios con registros" });
+  await expect(conRegistros.locator("li strong")).toHaveText(["Press de banca", "Remo con barra", "Dominadas"]);
+  await expect(conRegistros.locator("li").filter({ hasText: "Press de banca" })).toContainText("45 kg × 6");
+  await expect(conRegistros.locator("li").filter({ hasText: "Dominadas" })).toContainText("Primer registro");
+  await page.getByLabel("Buscar ejercicio").fill("remo");
+  await page.getByRole("group", { name: "Filtrar por grupo muscular" }).getByRole("button", { name: "Espalda", exact: true }).click();
+  await expect(conRegistros.locator("li")).toHaveCount(1);
+  const filaRemo = conRegistros.locator("li").filter({ hasText: "Remo con barra" });
+  await expect(filaRemo).toContainText("Espalda");
+  await expect(filaRemo).toContainText("40 kg × 10");
+  await expect(filaRemo).toContainText("Sin cambio en peso máximo");
+  await shot(page, "12a-progreso-lista");
+
+  // Detalle: indicadores y métrica «Reps totales» (28 y 28 antes de corregir).
+  await filaRemo.getByRole("link").click();
+  await expect(page.getByRole("heading", { name: "Remo con barra", level: 1 })).toBeVisible();
+  const resumen = page.getByRole("region", { name: "Resumen del período" });
+  await expect(resumen).toContainText("Última sesión");
+  await expect(resumen).toContainText("40 kg × 10");
+  await expect(resumen).toContainText("Sin cambio en peso máximo");
+  await expect(resumen).toContainText("Sesiones del período");
+  const metrica = page.getByRole("group", { name: "Métrica de la gráfica" });
+  await expect(metrica.getByRole("button", { name: "Peso máximo" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("img", { name: /Peso máximo por sesión.*Máximo 40 kg/ })).toBeVisible();
+  await metrica.getByRole("button", { name: "Reps totales" }).click();
+  await expect(page.getByRole("img", { name: /Repeticiones totales por sesión.*Máximo 28 reps/ })).toBeVisible();
+
+  // Corregir la sesión 2 desde «Ver sesión»: 40 × 10, 10, 10 → 30 reps totales.
+  await page.locator(`a[href="/sesiones/${session2}"]`).click();
+  await page.getByLabel("Repeticiones serie 3 de Remo con barra").fill("10");
+  await saved(page);
+  await page.goto("/progreso");
+  await page.getByLabel("Buscar ejercicio").fill("remo");
+  await conRegistros.locator("li").filter({ hasText: "Remo con barra" }).getByRole("link").click();
+  await page.getByRole("group", { name: "Métrica de la gráfica" }).getByRole("button", { name: "Reps totales" }).click();
+  await expect(page.getByRole("img", { name: /Repeticiones totales por sesión.*Máximo 30 reps/ })).toBeVisible();
+  await expect(resumen).toContainText("Sin cambio en peso máximo");
+  // Tocar el último punto muestra fecha, valor, unidad y series que aportan.
+  await page.locator(".chart rect[fill=transparent]").last().dispatchEvent("pointerdown");
+  const tooltip = page.locator("figure [role=status]");
+  await expect(tooltip).toContainText("30 reps");
+  await expect(tooltip).toContainText("3 series");
+  const historial = page.getByRole("region", { name: "Series por fecha" });
+  await expect(historial.locator(".history-item").first()).toContainText("30 reps totales");
+  await expect(historial.locator(".history-item").nth(1)).toContainText("28 reps totales");
+  await shot(page, "12b-progreso-detalle");
+
+  // Sesión 3, el mismo día que la 2: 42,5 kg × 6 → un punto por sesión y «+2,5 kg».
+  await page.goto("/entrenar");
+  await page.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(5));
+  await addExercise(page, "Remo con barra");
+  await remo.getByLabel("Cantidad de series de Remo con barra").fill("1");
+  await remo.getByLabel("Repeticiones por serie de Remo con barra").fill("6");
+  await remo.getByLabel("Peso por serie de Remo con barra", { exact: false }).fill("42,5");
+  await remo.getByRole("button", { name: "Agregar 1 serie" }).click();
+  await saved(page);
+  await page.goto("/progreso?q=remo&grupo=espalda");
+  await expect(filaRemo).toContainText("42,5 kg × 6");
+  await expect(filaRemo).toContainText("+2,5 kg vs. sesión anterior");
+  await filaRemo.getByRole("link").click();
+  await expect(resumen).toContainText("42,5 kg × 6");
+  await expect(resumen).toContainText("+2,5 kg vs. sesión anterior");
+  await expect(page.getByRole("img", { name: /3 sesiones/ })).toBeVisible();
+  await expect(historial.locator(".history-item")).toHaveCount(3);
+  await expect(historial.getByText("sesión 2 de 2")).toBeVisible();
+  await expect(historial.getByText("sesión 1 de 2")).toBeVisible();
+
+  // Rangos: «30 días» incluye todo; un rango personalizado vacío ofrece ampliar el período.
+  const periodo = page.getByRole("group", { name: "Período" });
+  await periodo.getByRole("button", { name: "30 días" }).click();
+  await expect(historial.locator(".history-item")).toHaveCount(3);
+  await periodo.getByRole("button", { name: "Personalizado" }).click();
+  await page.getByLabel("Desde").fill(isoDaysAgo(40));
+  await page.getByLabel("Hasta").fill(isoDaysAgo(30));
+  await expect(page.getByText(/No hay sesiones entre/)).toBeVisible();
+  await shot(page, "12c-progreso-rango-vacio");
+  await page.getByRole("button", { name: "Ver todo el historial" }).click();
+  await expect(historial.locator(".history-item")).toHaveCount(3);
+
+  // Cambiar de métrica y volver al listado conservando búsqueda y grupo.
+  await page.getByRole("group", { name: "Métrica de la gráfica" }).getByRole("button", { name: "Reps totales" }).click();
+  await page.getByRole("link", { name: "‹ Progreso" }).click();
+  await expect(page).toHaveURL(/\/progreso\?q=remo&grupo=espalda$/);
+  await expect(page.getByLabel("Buscar ejercicio")).toHaveValue("remo");
+  await expect(page.getByRole("group", { name: "Filtrar por grupo muscular" }).getByRole("button", { name: "Espalda", exact: true })).toHaveAttribute("aria-pressed", "true");
+
+  // Peso corporal: «Mejor serie» y «Reps totales».
+  await page.goto("/progreso");
+  await conRegistros.locator("li").filter({ hasText: "Dominadas" }).getByRole("link").click();
+  await expect(page.getByRole("group", { name: "Métrica de la gráfica" }).getByRole("button")).toHaveText(["Mejor serie", "Reps totales"]);
+  await expect(resumen).toContainText("10 reps");
+  await expect(resumen).toContainText("Primer registro");
+  await expect(page.getByRole("img", { name: /Mejor serie por sesión/ })).toBeVisible();
+
+  // Renombrar y archivar conservan el historial.
+  await page.goto("/ejercicios");
+  await catalogRow(page, "Remo con barra").getByRole("button").click();
+  const sheet = page.getByRole("dialog", { name: "Editar ejercicio" });
+  await sheet.getByLabel("Nombre").fill("Remo con barra pronado");
+  await sheet.getByRole("button", { name: "Guardar cambios" }).click();
+  await expect(sheet).toBeHidden();
+  await catalogRow(page, "Remo con barra pronado").getByRole("button").click();
+  await sheet.getByRole("button", { name: "Archivar ejercicio" }).click();
+  await expect(sheet).toBeHidden();
+  await page.goto("/progreso");
+  await page.getByText(/^Archivados \(/).click();
+  const archivados = page.getByRole("list", { name: "Ejercicios archivados" });
+  await expect(archivados.locator("li").filter({ hasText: "Remo con barra pronado" })).toContainText("+2,5 kg vs. sesión anterior");
+  await archivados.locator("li").filter({ hasText: "Remo con barra pronado" }).getByRole("link").click();
+  await expect(page.getByText("Archivado", { exact: true })).toBeVisible();
+  await expect(historial.locator(".history-item")).toHaveCount(3);
+  await page.context().close();
+});
+
 test("cuenta B no accede a los datos de A, ni por URL directa", async ({ browser }) => {
   const page = await newPage(browser);
   await login(page, userB.email, userB.temp);
@@ -610,7 +750,7 @@ test("desactivar la cuenta A corta su sesión abierta", async ({ browser }) => {
   await expect(again.getByText("Activa", { exact: true })).toBeVisible();
   await login(pageA, userA.email, userA.final);
   await pageA.goto("/historial");
-  await expect(pageA.locator(".list > li")).toHaveCount(2);
+  await expect(pageA.locator(".list > li").filter({ hasText: "Press de banca" })).toHaveCount(2);
   await pageA.context().close();
   await admin.context().close();
 });
