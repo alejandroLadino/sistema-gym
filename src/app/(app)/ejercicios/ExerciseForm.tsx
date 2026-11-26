@@ -4,9 +4,10 @@ import { useActionState, useEffect, useRef } from "react";
 import { createExercise, updateExercise, type ExerciseFormState } from "@/app/actions/exercises";
 import { FormMessage } from "@/components/FormMessage";
 import { SubmitButton } from "@/components/SubmitButton";
-import type { Exercise } from "@/lib/types";
+import { MuscleGroupSelect } from "@/components/MuscleGroupSelect";
+import type { Exercise, MuscleGroup } from "@/lib/types";
 
-export function ExerciseForm({ exercise }: { exercise?: Exercise }) {
+export function ExerciseForm({ exercise, groups }: { exercise?: Exercise; groups: MuscleGroup[] }) {
   const [state, action] = useActionState<ExerciseFormState, FormData>(exercise ? updateExercise : createExercise, {});
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -23,10 +24,7 @@ export function ExerciseForm({ exercise }: { exercise?: Exercise }) {
           <span>Nombre</span>
           <input className="input" name="name" required maxLength={80} defaultValue={exercise?.name} placeholder="Ej.: Press de banca" />
         </label>
-        <label className="field">
-          <span>Grupo muscular (opcional)</span>
-          <input className="input" name="muscle_group" maxLength={60} defaultValue={exercise?.muscle_group ?? ""} placeholder="Ej.: Pecho" />
-        </label>
+        <MuscleGroupSelect groups={groups} defaultValue={exercise?.muscle_group_id} />
       </div>
       <label className="field">
         <span>Notas (opcional)</span>

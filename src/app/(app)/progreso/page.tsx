@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
+import { EXERCISE_COLUMNS, getMuscleGroups } from "@/lib/muscle-groups";
+import { muscleGroupName } from "@/lib/muscle-group-utils";
 import { createClient } from "@/lib/supabase/server";
 import type { Exercise } from "@/lib/types";
 
@@ -9,10 +11,10 @@ export const metadata: Metadata = { title: "Progreso" };
 export default async function ProgressIndexPage() {
   await requireUser();
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("exercises")
-    .select("id, name, muscle_group, notes, archived_at")
-    .order("name");
+  const [{ data }, groups] = await Promise.all([
+    supabase.from("exercises").select(EXERCISE_COLUMNS).order("name"),
+    getMuscleGroups(),
+  ]);
   const exercises = (data ?? []) as Exercise[];
   const active = exercises.filter((e) => !e.archived_at);
   const archived = exercises.filter((e) => e.archived_at);
@@ -32,7 +34,7 @@ export default async function ProgressIndexPage() {
                   <div className="card row between">
                     <div>
                       <strong>{e.name}</strong>
-                      {e.muscle_group ? <div className="muted small">{e.muscle_group}</div> : null}
+                      {e.muscle_group_id ? <div className="muted small">{muscleGroupName(groups, e.muscle_group_id)}</div> : null}
                     </div>
                     <span className="muted small">Ver ›</span>
                   </div>

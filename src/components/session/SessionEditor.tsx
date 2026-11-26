@@ -23,7 +23,7 @@ import {
   type DraftExercise,
   type DraftSet,
 } from "@/lib/session-draft";
-import type { Exercise, PreviousSets, SessionData } from "@/lib/types";
+import type { Exercise, MuscleGroup, PreviousSets, SessionData } from "@/lib/types";
 import { uuidv4 } from "@/lib/uuid";
 import { ExercisePicker } from "./ExercisePicker";
 
@@ -32,6 +32,7 @@ type Status = "empty" | "dirty" | "invalid" | "saving" | "saved" | "error";
 type Props = {
   userId: string;
   exercises: Exercise[];
+  muscleGroups: MuscleGroup[];
   /** Sesión existente (edición). Sin ella se crea una nueva. */
   initial?: SessionData;
 };
@@ -47,7 +48,7 @@ const STATUS_TEXT: Record<Status, string> = {
   error: "No se guardó",
 };
 
-export function SessionEditor({ userId, exercises, initial }: Props) {
+export function SessionEditor({ userId, exercises, muscleGroups, initial }: Props) {
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [catalog, setCatalog] = useState<Exercise[]>(exercises);
@@ -505,6 +506,7 @@ export function SessionEditor({ userId, exercises, initial }: Props) {
       {pickerOpen ? (
         <ExercisePicker
           exercises={catalog}
+          muscleGroups={muscleGroups}
           inSession={inSession}
           onClose={() => setPickerOpen(false)}
           onPick={addExercise}

@@ -52,9 +52,9 @@ where id in ('aaaaaaaa-0000-0000-0000-000000000001', 'bbbbbbbb-0000-0000-0000-00
 select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
 set role authenticated;
 
-insert into public.exercises (id, name, muscle_group) values
-  ('e0000000-0000-0000-0000-00000000000a', 'Press de banca', 'Pecho'),
-  ('e0000000-0000-0000-0000-00000000000b', 'Dominadas', 'Espalda');
+insert into public.exercises (id, name, muscle_group_id) values
+  ('e0000000-0000-0000-0000-00000000000a', 'Press de banca', 'pecho'),
+  ('e0000000-0000-0000-0000-00000000000b', 'Dominadas', 'espalda');
 
 do $$
 declare ok boolean := false;
@@ -337,3 +337,96 @@ begin
   assert not has_schema_privilege('anon', 'private', 'usage'), 'anon no debe usar el esquema private';
 end $$;
 \echo '   Funciones auxiliares fuera de la API: OK'
+
+-- 9. Catálogo de grupos musculares -------------------------------------------------
+select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
+set role authenticated;
+do $$
+declare ok boolean;
+begin
+  assert (select count(*) from public.muscle_groups) = 17, 'El catálogo debe tener 17 grupos';
+  assert (select name from public.muscle_groups where id = 'cuadriceps') = 'Cuádriceps', 'Nombre con tilde';
+
+  ok := false;
+  begin
+    insert into public.muscle_groups (id, name, region, sort_order) values ('nuevo', 'Nuevo', 'General', 999);
+  exception when insufficient_privilege then ok := true;
+  end;
+  assert ok, 'Un usuario no puede agregar grupos al catálogo';
+
+  ok := false;
+  begin
+    update public.muscle_groups set name = 'Hackeado' where id = 'pecho';
+  exception when insufficient_privilege then ok := true;
+  end;
+  assert ok, 'Un usuario no puede modificar el catálogo';
+
+  ok := false;
+  begin
+    insert into public.exercises (name, muscle_group_id) values ('Curl', 'PECHO ');
+  exception when foreign_key_violation then ok := true;
+  end;
+  assert ok, 'Solo se aceptan ids del catálogo';
+
+  insert into public.exercises (name, muscle_group_id) values ('Curl de bíceps', 'biceps');
+  insert into public.exercises (name) values ('Burpees');
+  assert (select count(*) from public.exercises where muscle_group_id is null) = 1, 'El grupo es opcional';
+end $$;
+reset role;
+
+-- El detalle de la sesión muestra el nombre del grupo desde el catálogo.
+select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+do $$
+begin
+  assert public.get_workout_session('50000000-0000-0000-0000-000000000002') -> 'exercises' -> 0 ->> 'muscle_group' = 'Pecho',
+    'get_workout_session debe devolver el nombre del grupo';
+end $$;
+reset role;
+
+select set_config('request.jwt.claims', '', false);
+set role anon;
+do $$
+declare ok boolean := false;
+begin
+  begin
+    perform count(*) from public.muscle_groups;
+  exception when insufficient_privilege then ok := true;
+  end;
+  assert ok, 'anon no puede leer el catálogo';
+end $$;
+reset role;
+
+do $$
+begin
+  assert private.muscle_group_from_text('  CUÁDRICEPS ') = 'cuadriceps', 'Conversión con tildes y espacios';
+  assert private.muscle_group_from_text('gemelos') = 'pantorrillas', 'Conversión de sinónimos';
+  assert private.muscle_group_from_text('Full   Body') = 'cuerpo_completo', 'Conversión de varias palabras';
+  assert private.muscle_group_from_text('brazos') is null, 'Sin coincidencia devuelve null';
+  assert private.muscle_group_from_text('') is null, 'Vacío devuelve null';
+end $$;
+\echo '   Catálogo de grupos musculares: OK'
+
+-- 10. Borrar un ejercicio con historial está bloqueado; borrar la cuenta completa funciona.
+select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+do $$
+declare ok boolean := false;
+begin
+  begin
+    delete from public.exercises where id = 'e0000000-0000-0000-0000-00000000000a';
+  exception when foreign_key_violation then ok := true;
+  end;
+  assert ok, 'No se debe poder borrar un ejercicio con historial (se archiva)';
+end $$;
+reset role;
+
+delete from auth.users where id = 'aaaaaaaa-0000-0000-0000-000000000001';
+do $$
+begin
+  assert not exists (select 1 from public.workout_sessions where user_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+    'Borrar la cuenta borra sus sesiones';
+  assert not exists (select 1 from public.exercises where user_id = 'aaaaaaaa-0000-0000-0000-000000000001'),
+    'Borrar la cuenta borra sus ejercicios';
+end $$;
+\echo '   Borrado de cuentas con historial: OK'

@@ -2,19 +2,22 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { quickCreateExercise } from "@/app/actions/exercises";
-import type { Exercise } from "@/lib/types";
+import { MuscleGroupSelect } from "@/components/MuscleGroupSelect";
+import { muscleGroupName } from "@/lib/muscle-group-utils";
+import type { Exercise, MuscleGroup } from "@/lib/types";
 import { normalizeSearch } from "@/lib/validation";
 import { IconPlus } from "@/components/icons";
 
 type Props = {
   exercises: Exercise[];
+  muscleGroups: MuscleGroup[];
   inSession: Set<string>;
   onPick: (exercise: Exercise) => void;
   onCreated: (exercise: Exercise) => void;
   onClose: () => void;
 };
 
-export function ExercisePicker({ exercises, inSession, onPick, onCreated, onClose }: Props) {
+export function ExercisePicker({ exercises, muscleGroups, inSession, onPick, onCreated, onClose }: Props) {
   const [query, setQuery] = useState("");
   const [muscle, setMuscle] = useState("");
   const [creating, setCreating] = useState(false);
@@ -38,9 +41,9 @@ export function ExercisePicker({ exercises, inSession, onPick, onCreated, onClos
     () =>
       exercises
         .filter((e) => !e.archived_at)
-        .filter((e) => !q || normalizeSearch(`${e.name} ${e.muscle_group ?? ""}`).includes(q))
+        .filter((e) => !q || normalizeSearch(`${e.name} ${muscleGroupName(muscleGroups, e.muscle_group_id) ?? ""}`).includes(q))
         .sort((a, b) => a.name.localeCompare(b.name, "es")),
-    [exercises, q],
+    [exercises, muscleGroups, q],
   );
   const exact = exercises.some((e) => !e.archived_at && normalizeSearch(e.name) === q);
 
@@ -50,7 +53,7 @@ export function ExercisePicker({ exercises, inSession, onPick, onCreated, onClos
     setCreating(true);
     setError(null);
     try {
-      const res = await quickCreateExercise({ name, muscle_group: muscle });
+      const res = await quickCreateExercise({ name, muscle_group_id: muscle || null });
       if (res.ok) onCreated(res.data);
       else setError(res.error);
     } catch {
@@ -90,10 +93,7 @@ export function ExercisePicker({ exercises, inSession, onPick, onCreated, onClos
 
         {query.trim() && !exact ? (
           <div className="card stack" style={{ marginTop: 12, padding: 12 }}>
-            <label className="field">
-              <span>Grupo muscular (opcional)</span>
-              <input className="input" value={muscle} onChange={(e) => setMuscle(e.target.value)} placeholder="Ej.: Pecho" maxLength={60} />
-            </label>
+            <MuscleGroupSelect groups={muscleGroups} value={muscle} onChange={setMuscle} label="Grupo muscular (opcional)" />
             <button type="button" className="btn btn-primary" onClick={create} disabled={creating}>
               <IconPlus /> {creating ? "Creando…" : `Crear «${query.trim()}»`}
             </button>
@@ -106,7 +106,7 @@ export function ExercisePicker({ exercises, inSession, onPick, onCreated, onClos
             <button key={e.id} type="button" role="listitem" className="sheet-item" onClick={() => onPick(e)}>
               <span>
                 <strong>{e.name}</strong>
-                {e.muscle_group ? <span className="muted small"> · {e.muscle_group}</span> : null}
+                {e.muscle_group_id ? <span className="muted small"> · {muscleGroupName(muscleGroups, e.muscle_group_id)}</span> : null}
               </span>
               {inSession.has(e.id) ? <span className="badge badge-primary">En la sesión</span> : null}
             </button>

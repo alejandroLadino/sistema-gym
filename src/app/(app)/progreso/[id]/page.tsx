@@ -6,6 +6,8 @@ import { ProgressChart, type ChartPoint } from "@/components/ProgressChart";
 import { requireUser } from "@/lib/auth";
 import { formatDate, formatKg, formatSet } from "@/lib/format";
 import { readDateRange } from "@/lib/search-params";
+import { EXERCISE_COLUMNS, getMuscleGroups } from "@/lib/muscle-groups";
+import { muscleGroupName } from "@/lib/muscle-group-utils";
 import { createClient } from "@/lib/supabase/server";
 import type { Exercise, SetValue } from "@/lib/types";
 import { isUuid } from "@/lib/validation";
@@ -28,11 +30,10 @@ export default async function ExerciseProgressPage({ params, searchParams }: Pag
   const { from, to } = readDateRange(await searchParams);
 
   const supabase = await createClient();
-  const { data: exercise } = await supabase
-    .from("exercises")
-    .select("id, name, muscle_group, notes, archived_at")
-    .eq("id", id)
-    .maybeSingle<Exercise>();
+  const [{ data: exercise }, groups] = await Promise.all([
+    supabase.from("exercises").select(EXERCISE_COLUMNS).eq("id", id).maybeSingle<Exercise>(),
+    getMuscleGroups(),
+  ]);
   if (!exercise) notFound();
 
   const { data, error } = await supabase.rpc("get_exercise_progress", {
@@ -61,7 +62,7 @@ export default async function ExerciseProgressPage({ params, searchParams }: Pag
         <div>
           <h1>{exercise.name}</h1>
           <div className="row small muted">
-            {exercise.muscle_group ? <span>{exercise.muscle_group}</span> : null}
+            {exercise.muscle_group_id ? <span>{muscleGroupName(groups, exercise.muscle_group_id)}</span> : null}
             {exercise.archived_at ? <span className="badge">Archivado</span> : null}
           </div>
         </div>

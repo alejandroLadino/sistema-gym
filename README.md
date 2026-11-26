@@ -69,6 +69,19 @@ npx supabase start
 `supabase start` aplica las migraciones automáticamente; para volver a empezar
 desde cero usa `npx supabase db reset`.
 
+### Migraciones en dos pasos
+
+Algunos cambios de esquema se publican en dos pasos para que la app en producción
+no falle mientras se despliega la versión nueva. El primer paso amplía el esquema;
+el segundo lo contrae y su comentario inicial indica
+*«Aplicar DESPUÉS de desplegar…»*:
+
+1. Aplica las migraciones hasta la de ampliación (compatibles con la app actual).
+2. Despliega la app nueva (merge a `main`).
+3. Aplica la migración de contracción.
+
+En una instalación nueva, sin datos ni app publicada, se aplican todas en orden.
+
 ### Configuración recomendada de Auth (proyecto en la nube)
 
 - *Authentication → Sign In / Providers → Email*: desactiva **Allow new users to sign up**.
@@ -168,7 +181,7 @@ desde el celular en la misma red, usa `http://<IP-de-tu-PC>:3000`.
 | `npm test` | pruebas unitarias (validación, borrador, formato) |
 | `npm run build` | compilación de producción |
 | `npm run check` | todo lo anterior |
-| `npm run test:db` | aplica las migraciones en un PostgreSQL local temporal y prueba RLS, aislamiento, desactivación, contraseña temporal, idempotencia, decimales, historial y progreso (requiere `initdb`/`pg_ctl`/`psql`; ruta con `PG_BIN`) |
+| `npm run test:db` | aplica las migraciones en un PostgreSQL local temporal (UTF-8, como Supabase) y prueba RLS, aislamiento, desactivación, contraseña temporal, idempotencia, decimales, historial, progreso, catálogo de grupos musculares y conversión de datos (requiere `initdb`/`pg_ctl`/`psql`; ruta con `PG_BIN`). Los archivos de `supabase/tests/ganchos/` siembran datos antes de una migración y los verifican después |
 | `npm run test:e2e` | flujo completo en el navegador con ancho móvil (ver abajo) |
 
 ### Prueba de extremo a extremo
