@@ -86,3 +86,10 @@ ambas sesiones. Para peso corporal se muestran repeticiones en el historial.
 - La clave `SUPABASE_SERVICE_ROLE_KEY` solo se usa en `src/lib/supabase/admin.ts`
   (marcado `server-only`). Nunca importarlo desde componentes cliente.
 - Antes de entregar: `npm run check` (lint, tipos, pruebas unitarias y build).
+- Migraciones y fusión: si un PR incluye migraciones nuevas, avisar siempre al
+  usuario de forma explícita (en el resumen del PR y en el mensaje), indicando
+  cuáles son y si deben aplicarse en Supabase **antes** o **después** de
+  fusionar. El usuario puede fusionar manualmente, así que el aviso debe darse
+  antes de que fusione, no solo al pedir permiso para hacerlo. Las versiones de
+  prueba de Vercel usan la base de datos de producción: fallarán hasta que la
+  migración esté aplicada.
