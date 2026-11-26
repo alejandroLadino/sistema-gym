@@ -128,26 +128,57 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
   await page.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(7));
 
   await addExercise(page, "Press de banca", { create: true, muscle: "Pecho" });
-  await expect(page.getByText(/Sin registros antes del/)).toBeVisible();
-  await setSet(page, "Press de banca", 1, "40", "12");
-  await page.getByRole("button", { name: "Agregar serie" }).click();
-  // La nueva serie repite la anterior: se edita.
-  await expect(page.getByLabel("Peso serie 2 de Press de banca", { exact: false })).toHaveValue("40");
-  await setSet(page, "Press de banca", 2, "45", "10");
-  await page.getByRole("button", { name: "Agregar serie" }).click();
-  await setSet(page, "Press de banca", 3, "50", "8");
+  const press = page.getByRole("region", { name: "Press de banca" });
+  await expect(press.getByText("Primer registro")).toBeVisible();
+  await expect(press.getByRole("button", { name: "Copiar última sesión" })).toHaveCount(0);
+  await shot(page, "04a-captura-rapida");
+
+  // 3 × 10 a 40 kg en una sola acción (3 es la cantidad inicial).
+  await expect(press.getByLabel("Cantidad de series de Press de banca")).toHaveValue("3");
+  await press.getByLabel("Repeticiones por serie de Press de banca").fill("10");
+  await press.getByLabel("Peso por serie de Press de banca", { exact: false }).fill("40");
+  await press.getByRole("button", { name: "Agregar 3 series" }).click();
+  await expect(press.getByLabel(/^Peso serie \d+ de Press de banca/)).toHaveCount(3);
+
+  // Cambiar solo la tercera serie a 8 reps.
+  await page.getByLabel("Repeticiones serie 3 de Press de banca").fill("8");
   await saved(page);
   await expect(page).toHaveURL(/\/sesiones\/[0-9a-f-]{36}$/);
   sessionA1 = page.url().split("/").pop()!;
 
-  // Ejercicio de peso corporal (sin peso), creado desde la misma sesión.
+  // Después de recargar: 40 × 10, 40 × 10, 40 × 8.
+  await page.reload();
+  await expect(press.getByLabel(/^Peso serie \d+ de Press de banca/)).toHaveCount(3);
+  for (const [n, reps] of [[1, "10"], [2, "10"], [3, "8"]] as const) {
+    await expect(page.getByLabel(`Peso serie ${n} de Press de banca`, { exact: false })).toHaveValue("40");
+    await expect(page.getByLabel(`Repeticiones serie ${n} de Press de banca`)).toHaveValue(reps);
+  }
+  await shot(page, "04b-tres-series-recargadas");
+
+  // «Agregar serie» precarga la última fila; se edita para tener pesos distintos.
+  await press.getByRole("button", { name: "Agregar serie", exact: true }).click();
+  await expect(page.getByLabel("Peso serie 4 de Press de banca", { exact: false })).toHaveValue("40");
+  await expect(page.getByLabel("Repeticiones serie 4 de Press de banca")).toHaveValue("8");
+  await setSet(page, "Press de banca", 4, "42,5", "6");
+  await saved(page);
+
+  // Ejercicio de peso corporal, creado desde la misma sesión.
   await addExercise(page, "Dominadas", { create: true, muscle: "Espalda" });
+  const dominadas = page.getByRole("region", { name: "Dominadas" });
+  // «Agregar serie» con el ejercicio vacío lleva a la captura rápida.
+  await dominadas.getByRole("button", { name: "Agregar serie", exact: true }).click();
+  await expect(dominadas.getByLabel("Repeticiones por serie de Dominadas")).toBeFocused();
+  await dominadas.getByLabel("Cantidad de series de Dominadas").fill("2");
+  await dominadas.getByLabel("Repeticiones por serie de Dominadas").fill("10");
+  await dominadas.getByRole("button", { name: "Agregar 2 series" }).click();
+  await expect(page.getByLabel("Peso serie 1 de Dominadas", { exact: false })).toHaveValue("");
+  await saved(page);
 
   // Falla el guardado (sin red hacia el servidor) → se conserva lo capturado.
   await page.route("**/*", (route) =>
     route.request().method() === "POST" && route.request().headers()["next-action"] ? route.abort("internetdisconnected") : route.continue(),
   );
-  await setSet(page, "Dominadas", 1, "", "10");
+  await page.getByLabel("Repeticiones serie 2 de Dominadas").fill("8");
   await expect(page.getByRole("status").filter({ hasText: "No se guardó" })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("button", { name: "Reintentar" })).toBeVisible();
   await shot(page, "04-error-guardado");
@@ -156,9 +187,7 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
   await page.unroute("**/*");
   await page.reload();
   await expect(page.getByText("Recuperamos cambios")).toBeVisible();
-  await expect(page.getByLabel("Repeticiones serie 1 de Dominadas")).toHaveValue("10");
-  await page.getByRole("button", { name: "Agregar serie" }).nth(1).click();
-  await page.getByLabel("Repeticiones serie 2 de Dominadas").fill("8");
+  await expect(page.getByLabel("Repeticiones serie 2 de Dominadas")).toHaveValue("8");
   // Doble toque en Guardar: idempotente.
   const guardar = page.getByRole("button", { name: "Guardar", exact: true });
   if (await guardar.isVisible()) await guardar.dblclick().catch(() => {});
@@ -166,9 +195,10 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
   await shot(page, "05-sesion-guardada");
 
   await page.reload();
-  await expect(page.getByLabel("Peso serie 3 de Press de banca", { exact: false })).toHaveValue("50");
+  await expect(page.getByLabel("Peso serie 4 de Press de banca", { exact: false })).toHaveValue("42,5");
   await expect(page.getByLabel("Repeticiones serie 2 de Dominadas")).toHaveValue("8");
   await expect(page.getByLabel("Peso serie 1 de Dominadas", { exact: false })).toHaveValue("");
+  await expect(page.getByLabel("Peso serie 2 de Dominadas", { exact: false })).toHaveValue("");
 
   await page.getByRole("button", { name: "Terminar" }).click();
   await expect(page).toHaveURL(/\/historial$/);
@@ -176,7 +206,7 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
   await page.context().close();
 });
 
-test("cuenta A: días después reutiliza el ejercicio y ve las series anteriores", async ({ browser }) => {
+test("cuenta A: días después reutiliza el ejercicio y copia la última sesión", async ({ browser }) => {
   const page = await newPage(browser);
   await login(page, userA.email, userA.final);
   await page.getByRole("link", { name: "Registrar entrenamiento" }).click();
@@ -184,17 +214,26 @@ test("cuenta A: días después reutiliza el ejercicio y ve las series anteriores
 
   await addExercise(page, "press");
   const card = page.getByRole("region", { name: "Press de banca" });
-  await expect(card.getByText("Anterior:")).toBeVisible();
-  await expect(card.locator(".chip")).toHaveText(["40 kg × 12", "45 kg × 10", "50 kg × 8"]);
+  await expect(card.getByText("Última vez")).toBeVisible();
+  await expect(card.locator(".previous-summary")).toHaveText("2 × 10 a 40 kg · 40 kg × 8 · 42,5 kg × 6");
   await shot(page, "06-series-anteriores");
 
-  await card.getByRole("button", { name: "Copiar series" }).click();
-  await expect(page.getByLabel("Peso serie 3 de Press de banca", { exact: false })).toHaveValue("50");
-  await setSet(page, "Press de banca", 1, "42,5", "12");
-  await setSet(page, "Press de banca", 3, "52,5", "8");
+  // Copia con los valores originales, aunque pesos y reps sean distintos.
+  await card.getByRole("button", { name: "Copiar última sesión" }).click();
+  const esperado = [["40", "10"], ["40", "10"], ["40", "8"], ["42,5", "6"]];
+  await expect(card.getByLabel(/^Peso serie \d+ de Press de banca/)).toHaveCount(4);
+  for (const [i, [peso, reps]] of esperado.entries()) {
+    await expect(page.getByLabel(`Peso serie ${i + 1} de Press de banca`, { exact: false })).toHaveValue(peso);
+    await expect(page.getByLabel(`Repeticiones serie ${i + 1} de Press de banca`)).toHaveValue(reps);
+  }
+  // Con series ya cargadas no se ofrece copiar otra vez (evita duplicados).
+  await expect(card.getByRole("button", { name: "Copiar última sesión" })).toHaveCount(0);
+
+  await setSet(page, "Press de banca", 4, "45", "6");
   await saved(page);
   await page.reload();
-  await expect(page.getByLabel("Peso serie 1 de Press de banca", { exact: false })).toHaveValue("42,5");
+  await expect(page.getByLabel("Peso serie 4 de Press de banca", { exact: false })).toHaveValue("45");
+  await expect(page.getByLabel("Repeticiones serie 3 de Press de banca")).toHaveValue("8");
   await shot(page, "07-sesion-nueva");
 
   // Progreso: dos sesiones y gráfica.
@@ -204,9 +243,8 @@ test("cuenta A: días después reutiliza el ejercicio y ve las series anteriores
   pressId = page.url().split("/").pop()!.split("?")[0];
   await expect(page.getByRole("img", { name: /Peso máximo por sesión/ })).toBeVisible();
   await expect(page.locator("table.data tbody tr")).toHaveCount(2);
-  await expect(page.locator("table.data")).toContainText("42,5 kg × 12");
-  await expect(page.locator("table.data")).toContainText("52,5 kg");
-  await expect(page.locator("table.data")).toContainText("50 kg");
+  await expect(page.locator("table.data")).toContainText("42,5 kg × 6");
+  await expect(page.locator("table.data")).toContainText("45 kg × 6");
   await shot(page, "08-progreso");
 
   // Filtro por fechas: solo la sesión antigua.
@@ -285,7 +323,8 @@ test("cuenta A: corrige una sesión anterior desde el historial", async ({ brows
   await saved(page);
   await page.reload();
   await expect(page.getByLabel("Peso serie 2 de Press de banca", { exact: false })).toHaveValue("46,25");
-  await expect(page.getByLabel("Peso serie 3 de Press de banca", { exact: false })).toHaveCount(0);
+  await expect(page.getByLabel("Peso serie 3 de Press de banca", { exact: false })).toHaveValue("42,5");
+  await expect(page.getByLabel("Peso serie 4 de Press de banca", { exact: false })).toHaveCount(0);
   await page.context().close();
 });
 

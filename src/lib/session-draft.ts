@@ -1,6 +1,6 @@
 import { isIsoDate } from "./format";
 import type { SessionData, SetValue } from "./types";
-import { parseReps, parseWeight } from "./validation";
+import { parseReps, parseWeight, type Parsed } from "./validation";
 
 export type DraftSet = { key: string; reps: string; weight: string };
 export type DraftExercise = {
@@ -103,6 +103,52 @@ export function draftToPayload(
       exercises,
     },
   };
+}
+
+export const MAX_QUICK_SETS = 20;
+
+export type QuickAddInput = { count: string; reps: string; weight: string };
+export type QuickAddErrors = Partial<Record<keyof QuickAddInput, string>>;
+
+/** Cantidad de series de la captura rápida (1 a 20). */
+export function parseSetCount(input: string): Parsed<number> {
+  const raw = input.trim();
+  if (!/^\d{1,2}$/.test(raw)) return { ok: false, error: "Indica cuántas series" };
+  const value = Number(raw);
+  if (value < 1 || value > MAX_QUICK_SETS) return { ok: false, error: `Entre 1 y ${MAX_QUICK_SETS} series` };
+  return { ok: true, value };
+}
+
+/**
+ * Captura rápida: «3 series × 10 reps a 40 kg» → 3 filas editables.
+ * El peso vacío es peso corporal.
+ */
+export function buildQuickSets(
+  input: QuickAddInput,
+): { ok: true; sets: DraftSet[] } | { ok: false; errors: QuickAddErrors } {
+  const errors: QuickAddErrors = {};
+  const count = parseSetCount(input.count);
+  const reps = parseReps(input.reps);
+  const weight = parseWeight(input.weight);
+  if (!count.ok) errors.count = count.error;
+  if (!reps.ok) errors.reps = reps.error;
+  if (!weight.ok) errors.weight = weight.error;
+  if (!count.ok || !reps.ok || !weight.ok) return { ok: false, errors };
+  const weightText = weightToInput(weight.value);
+  return {
+    ok: true,
+    sets: Array.from({ length: count.value }, () => ({ key: newKey(), reps: String(reps.value), weight: weightText })),
+  };
+}
+
+/** Agrega series al final; descarta filas totalmente vacías. */
+export function appendSets(current: DraftSet[], added: DraftSet[]): DraftSet[] {
+  return [...current.filter((s) => !isSetBlank(s)), ...added];
+}
+
+/** Un ejercicio está vacío si no tiene ninguna serie con datos. */
+export function hasNoSets(sets: DraftSet[]): boolean {
+  return sets.every(isSetBlank);
 }
 
 /** Copia las series de la sesión anterior: reemplaza filas vacías, si no, añade. */

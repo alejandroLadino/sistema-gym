@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deleteSession, getPreviousSets, saveSession } from "@/app/actions/sessions";
 import { IconCopy, IconDown, IconPlus, IconTrash, IconUp } from "@/components/icons";
-import { formatDate, formatSet, todayLocal } from "@/lib/format";
+import { formatDate, summarizeSets, todayLocal } from "@/lib/format";
 import {
+  appendSets,
   clearNewPointer,
   copyPreviousSets,
   draftToPayload,
+  hasNoSets,
   isSetBlank,
   newKey,
   nextSet,
@@ -26,6 +28,7 @@ import {
 import type { Exercise, MuscleGroup, PreviousSets, SessionData } from "@/lib/types";
 import { uuidv4 } from "@/lib/uuid";
 import { ExercisePicker } from "./ExercisePicker";
+import { QuickAddSets, quickRepsInputId } from "./QuickAddSets";
 
 type Status = "empty" | "dirty" | "invalid" | "saving" | "saved" | "error";
 
@@ -59,6 +62,8 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
   const [pickerOpen, setPickerOpen] = useState(false);
   const [previous, setPrevious] = useState<Record<string, Record<string, PreviousSets | null>>>({});
   const [prevError, setPrevError] = useState(false);
+  /** Captura rápida abierta en ejercicios que ya tienen series (en los vacíos siempre se muestra). */
+  const [quickOpen, setQuickOpen] = useState<Record<string, boolean>>({});
 
   const draftRef = useRef<Draft | null>(null);
   const revision = useRef(0);
@@ -248,7 +253,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
       ...d,
       exercises: [
         ...d.exercises,
-        { key: newKey(), exerciseId: exercise.id, name: exercise.name, sets: [{ key: newKey(), reps: "", weight: "" }] },
+        { key: newKey(), exerciseId: exercise.id, name: exercise.name, sets: [] },
       ],
     }));
   };
@@ -273,10 +278,32 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
     update((d) => ({ ...d, exercises: d.exercises.filter((e) => e.key !== ex.key) }));
   };
 
+  /** Copia la última sesión con sus valores originales. Solo se ofrece con el ejercicio vacío. */
   const copyPrevious = (ex: DraftExercise, prev: PreviousSets) => {
-    const hasData = ex.sets.some((s) => !isSetBlank(s));
-    if (hasData && !window.confirm("Se añadirán las series anteriores a las que ya escribiste. ¿Continuar?")) return;
-    updateExercise(ex.key, (e) => ({ ...e, sets: copyPreviousSets(e.sets, prev.sets) }));
+    updateExercise(ex.key, (e) => (hasNoSets(e.sets) ? { ...e, sets: copyPreviousSets(e.sets, prev.sets) } : e));
+    setQuickOpen((q) => ({ ...q, [ex.key]: false }));
+  };
+
+  const focusQuickReps = (exKey: string) =>
+    requestAnimationFrame(() => document.getElementById(quickRepsInputId(exKey))?.focus());
+
+  const addQuickSets = (ex: DraftExercise, sets: DraftSet[]) => {
+    updateExercise(ex.key, (e) => ({ ...e, sets: appendSets(e.sets, sets) }));
+    setQuickOpen((q) => ({ ...q, [ex.key]: false }));
+  };
+
+  /** «Agregar serie»: repite la última fila; con el ejercicio vacío abre la captura rápida. */
+  const addOneSet = (ex: DraftExercise) => {
+    if (hasNoSets(ex.sets)) {
+      focusQuickReps(ex.key);
+      return;
+    }
+    updateExercise(ex.key, (e) => ({ ...e, sets: [...e.sets.filter((s) => !isSetBlank(s)), nextSet(e.sets)] }));
+  };
+
+  const openQuick = (ex: DraftExercise) => {
+    setQuickOpen((q) => ({ ...q, [ex.key]: true }));
+    focusQuickReps(ex.key);
   };
 
   async function finish() {
@@ -370,6 +397,9 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
 
         {draft.exercises.map((ex, index) => {
           const prev = prevForDate?.[ex.exerciseId];
+          const empty = hasNoSets(ex.sets);
+          const showQuick = empty || Boolean(quickOpen[ex.key]);
+          const lastSet = ex.sets.filter((st) => !isSetBlank(st)).at(-1);
           return (
             <section key={ex.key} className="card exercise-card" aria-label={ex.name}>
               <div className="ex-head">
@@ -390,38 +420,26 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
                 </div>
               </div>
 
-              <div className="previous" aria-live="polite">
-                {prev === undefined ? (
-                  <span className="muted">{prevError ? "No se pudo cargar la sesión anterior." : "Buscando tu sesión anterior…"}</span>
-                ) : prev === null ? (
-                  <span className="muted">Sin registros antes del {formatDate(draft.date, { weekday: false })}.</span>
-                ) : (
-                  <>
-                    <div className="row between">
-                      <span>
-                        <strong>Anterior:</strong>{" "}
-                        <Link href={`/sesiones/${prev.session_id}`}>{formatDate(prev.session_date)}</Link>
-                      </span>
-                      <button type="button" className="btn btn-sm" onClick={() => copyPrevious(ex, prev)}>
-                        <IconCopy /> Copiar series
-                      </button>
-                    </div>
-                    <div className="sets-chips">
-                      {prev.sets.map((s, i) => (
-                        <span key={i} className="chip">{formatSet(s)}</span>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
+              <PreviousSummary
+                prev={prev}
+                loadError={prevError}
+                exerciseName={ex.name}
+                canCopy={empty}
+                onCopy={(p) => copyPrevious(ex, p)}
+              />
 
-              <div className="set-table">
-                {ex.sets.map((set, i) => (
-                  <div key={set.key}>
-                    <div className="set-row">
-                      <span className="num" aria-hidden="true">{i + 1}</span>
-                      <label className="field">
-                        <span>Peso (kg)</span>
+              {ex.sets.length ? (
+                <div className="set-table" role="group" aria-label={`Series de ${ex.name}`}>
+                  <div className="set-row set-head" aria-hidden="true">
+                    <span>Serie</span>
+                    <span>Peso (kg)</span>
+                    <span>Reps</span>
+                    <span />
+                  </div>
+                  {ex.sets.map((set, i) => (
+                    <div key={set.key}>
+                      <div className="set-row">
+                        <span className="num">{i + 1}</span>
                         <input
                           className="input"
                           inputMode="decimal"
@@ -433,43 +451,54 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
                           onChange={(e) => updateSet(ex.key, set.key, { weight: e.target.value })}
                           enterKeyHint="next"
                         />
-                      </label>
-                      <label className="field">
-                        <span>Reps</span>
                         <input
                           className="input"
                           inputMode="numeric"
                           pattern="[0-9]*"
                           autoComplete="off"
-                          placeholder="0"
+                          placeholder="—"
                           aria-label={`Repeticiones serie ${i + 1} de ${ex.name}`}
                           aria-invalid={setErrors[set.key] ? true : undefined}
                           value={set.reps}
                           onChange={(e) => updateSet(ex.key, set.key, { reps: e.target.value })}
                           enterKeyHint="done"
                         />
-                      </label>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-icon"
-                        aria-label={`Quitar serie ${i + 1} de ${ex.name}`}
-                        onClick={() => updateExercise(ex.key, (e) => ({ ...e, sets: e.sets.filter((s) => s.key !== set.key) }))}
-                      >
-                        <IconTrash />
-                      </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-icon"
+                          aria-label={`Quitar serie ${i + 1} de ${ex.name}`}
+                          onClick={() => updateExercise(ex.key, (e) => ({ ...e, sets: e.sets.filter((s) => s.key !== set.key) }))}
+                        >
+                          <IconTrash />
+                        </button>
+                      </div>
+                      {setErrors[set.key] ? <p className="set-error">Serie {i + 1}: {setErrors[set.key]}</p> : null}
                     </div>
-                    {setErrors[set.key] ? <div className="set-row"><span /><span className="set-error">{setErrors[set.key]}</span></div> : null}
-                  </div>
-                ))}
+                  ))}
+                </div>
+              ) : null}
+
+              {showQuick ? (
+                <QuickAddSets
+                  key={`${ex.key}-${ex.sets.length}`}
+                  exerciseKey={ex.key}
+                  exerciseName={ex.name}
+                  defaults={lastSet ? { reps: lastSet.reps, weight: lastSet.weight } : undefined}
+                  onAdd={(sets) => addQuickSets(ex, sets)}
+                  onCancel={empty ? undefined : () => setQuickOpen((q) => ({ ...q, [ex.key]: false }))}
+                />
+              ) : null}
+
+              <div className="set-actions">
+                <button type="button" className="btn" onClick={() => addOneSet(ex)}>
+                  <IconPlus /> Agregar serie
+                </button>
+                {!showQuick ? (
+                  <button type="button" className="btn" onClick={() => openQuick(ex)}>
+                    Varias series
+                  </button>
+                ) : null}
               </div>
-              <button
-                type="button"
-                className="btn btn-block"
-                style={{ marginTop: 10 }}
-                onClick={() => updateExercise(ex.key, (e) => ({ ...e, sets: [...e.sets, nextSet(e.sets)] }))}
-              >
-                <IconPlus /> Agregar serie
-              </button>
             </section>
           );
         })}
@@ -515,6 +544,45 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
             addExercise(exercise);
           }}
         />
+      ) : null}
+    </div>
+  );
+}
+
+function PreviousSummary({
+  prev,
+  loadError,
+  exerciseName,
+  canCopy,
+  onCopy,
+}: {
+  prev: PreviousSets | null | undefined;
+  loadError: boolean;
+  exerciseName: string;
+  canCopy: boolean;
+  onCopy: (prev: PreviousSets) => void;
+}) {
+  if (prev === undefined) {
+    return (
+      <p className="previous-line muted" aria-live="polite">
+        {loadError ? "No se pudo cargar la sesión anterior." : "Buscando tu sesión anterior…"}
+      </p>
+    );
+  }
+  if (prev === null) {
+    return <p className="previous-line muted">Primer registro</p>;
+  }
+  return (
+    <div className="previous" aria-label={`Última sesión de ${exerciseName}`}>
+      <p className="previous-line">
+        <span className="muted">Última vez · </span>
+        <Link href={`/sesiones/${prev.session_id}`}>{formatDate(prev.session_date, { year: false })}</Link>
+      </p>
+      <p className="previous-summary">{summarizeSets(prev.sets)}</p>
+      {canCopy ? (
+        <button type="button" className="btn btn-sm" onClick={() => onCopy(prev)}>
+          <IconCopy /> Copiar última sesión
+        </button>
       ) : null}
     </div>
   );

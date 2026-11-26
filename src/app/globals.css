@@ -46,7 +46,8 @@
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: 76px; }
+@media (min-width: 900px) { html { scroll-padding-top: 128px; } }
 body {
   margin: 0;
   background: var(--bg);
@@ -178,13 +179,19 @@ textarea.input { min-height: 88px; resize: vertical; }
 .auth-card .brand-big { font-size: 1.6rem; font-weight: 800; text-align: center; margin-bottom: 4px; }
 
 /* --- Editor de sesión ------------------------------------------------- */
+/* Barra opaca: al desplazarse, el título y la fecha no se ven a través de ella. */
 .save-bar {
   position: sticky; top: 0; z-index: 15; margin: -16px -16px 16px; padding: 10px 16px;
-  background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px);
-  border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 60px; background: var(--bg);
+  border-bottom: 1px solid var(--border); box-shadow: 0 6px 12px -10px rgb(0 0 0 / 0.35);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }
+.save-bar .save-status { min-width: 0; }
+.save-bar .save-status > :last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (min-width: 900px) { .save-bar { top: 49px; } }
 .save-status { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; font-size: 0.92rem; }
+/* Ningún campo enfocado queda escondido detrás de la barra fija. */
+.exercise-card .input, .field .input { scroll-margin-top: 76px; }
 .save-status .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
 .save-status[data-state="saving"] .dot { background: var(--primary); animation: pulse 1s infinite; }
 .save-status[data-state="saved"] { color: var(--success); }
@@ -194,23 +201,43 @@ textarea.input { min-height: 88px; resize: vertical; }
 .save-status[data-state="dirty"] .dot, .save-status[data-state="invalid"] .dot { background: var(--warning); }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
-.exercise-card .ex-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.exercise-card .ex-head h3 { margin: 0; font-size: 1.1rem; }
+.exercise-card .ex-head { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.exercise-card .ex-head > div:first-child { flex: 1; min-width: 0; }
+.exercise-card .ex-head h3 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
+.exercise-card .ex-head .btn-icon { width: 40px; min-height: 40px; }
+/* Sesión anterior: fecha y resumen compacto */
+.previous-line { margin: 8px 0 0; font-size: 0.9rem; }
 .previous {
-  margin: 10px 0; padding: 10px 12px; border-radius: 12px; background: var(--surface-2);
-  display: grid; gap: 8px; font-size: 0.92rem;
+  margin: 8px 0 0; padding: 8px 12px; border-radius: 12px; background: var(--surface-2);
+  display: grid; gap: 4px; justify-items: start;
 }
-.previous .sets-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { padding: 4px 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); font-weight: 600; font-size: 0.88rem; }
+.previous .previous-line { margin: 0; }
+.previous-summary { margin: 0; font-weight: 700; font-size: 0.95rem; }
+.previous .btn { margin-top: 4px; }
 
-.set-table { display: grid; gap: 8px; margin-top: 8px; }
-.set-row { display: grid; grid-template-columns: 28px 1fr 1fr var(--tap); gap: 8px; align-items: end; }
-.set-row .num { font-weight: 800; color: var(--muted); text-align: center; padding-bottom: 13px; }
-.set-row .field > span { font-size: 0.78rem; color: var(--muted); font-weight: 600; }
-.set-row .input { text-align: center; font-size: 1.15rem; font-weight: 700; min-height: 52px; }
-/* Etiquetas visibles solo en la primera serie; las demás conservan su aria-label. */
-.set-table > div:not(:first-child) .set-row .field > span { display: none; }
-.set-error { grid-column: 2 / -1; color: var(--danger); font-size: 0.82rem; margin-top: -4px; }
+/* Tabla compacta de series */
+.set-table { display: grid; gap: 6px; margin-top: 12px; }
+.set-row { display: grid; grid-template-columns: 40px 1fr 1fr var(--tap); gap: 6px; align-items: center; }
+.set-head { font-size: 0.8rem; font-weight: 700; color: var(--muted); }
+.set-head > span { text-align: center; }
+.set-row .num { font-weight: 800; color: var(--muted); text-align: center; }
+.set-row .input { text-align: center; font-size: 1.15rem; font-weight: 700; min-height: 48px; padding: 6px 8px; }
+.set-row .input::placeholder { color: var(--muted); font-weight: 600; }
+.set-error { margin: 2px 0 0 46px; color: var(--danger); font-size: 0.82rem; }
+
+/* Captura rápida: «3 series × 10 reps a 40 kg» */
+.quick-add {
+  margin-top: 12px; padding: 12px; border-radius: 12px; display: grid; gap: 8px;
+  background: var(--primary-soft); border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+}
+.quick-add-fields { display: grid; grid-template-columns: 0.8fr 1fr 1.2fr; gap: 8px; }
+.quick-add-fields .field > span { font-size: 0.8rem; }
+.quick-add-fields .input { text-align: center; font-size: 1.1rem; font-weight: 700; min-height: 48px; padding: 6px 8px; }
+.quick-add-hint, .quick-add-error { margin: 0; font-size: 0.82rem; }
+.quick-add-error { color: var(--danger); }
+
+.set-actions { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; margin-top: 10px; }
+.set-actions .btn { white-space: nowrap; padding: 0 10px; }
 
 /* --- Selector de ejercicios (hoja inferior) --------------------------- */
 .sheet-backdrop { position: fixed; inset: 0; z-index: 50; background: rgb(0 0 0 / 0.45); display: flex; align-items: flex-end; justify-content: center; }
