@@ -63,6 +63,14 @@ async function addExercise(page: Page, name: string, opts: { create?: boolean; m
   await expect(dialog).toBeHidden();
 }
 
+/** Expande un ejercicio colapsado del editor (si ya está abierto, no hace nada). */
+async function expand(page: Page, exercise: string) {
+  await expect(page.getByRole("button", { name: new RegExp(`^(Expandir|Colapsar) ${exercise}$`) })).toBeVisible();
+  const toggle = page.getByRole("button", { name: `Expandir ${exercise}` });
+  if (await toggle.count()) await toggle.click();
+  await expect(page.getByRole("button", { name: `Colapsar ${exercise}` })).toBeVisible();
+}
+
 const saved = (page: Page) => expect(page.getByRole("status").filter({ hasText: /^Guardado$/ })).toBeVisible({ timeout: 15_000 });
 
 let sessionA1 = "";
@@ -165,6 +173,17 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
   // Ejercicio de peso corporal, creado desde la misma sesión.
   await addExercise(page, "Dominadas", { create: true, muscle: "Espalda" });
   const dominadas = page.getByRole("region", { name: "Dominadas" });
+
+  // Al agregar otro ejercicio, el anterior se colapsa y muestra su resumen.
+  await expect(page.getByRole("button", { name: "Expandir Press de banca" })).toHaveAttribute("aria-expanded", "false");
+  await expect(press.locator(".ex-summary")).toHaveText("4 series · 2 × 10 a 40 kg · 40 kg × 8 · 42,5 kg × 6");
+  await expect(press.getByLabel(/^Peso serie \d+ de Press de banca/)).toHaveCount(0);
+  await shot(page, "05b-ejercicio-colapsado");
+  await page.getByRole("button", { name: "Expandir Press de banca" }).click();
+  await expect(press.getByLabel(/^Peso serie \d+ de Press de banca/)).toHaveCount(4);
+  await page.getByRole("button", { name: "Colapsar Press de banca" }).click();
+  await expect(press.getByLabel(/^Peso serie \d+ de Press de banca/)).toHaveCount(0);
+
   // «Agregar serie» con el ejercicio vacío lleva a la captura rápida.
   await dominadas.getByRole("button", { name: "Agregar serie", exact: true }).click();
   await expect(dominadas.getByLabel("Repeticiones por serie de Dominadas")).toBeFocused();
@@ -195,6 +214,9 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
   await shot(page, "05-sesion-guardada");
 
   await page.reload();
+  // Al abrir una sesión con varios ejercicios, solo el último queda abierto.
+  await expect(page.getByRole("button", { name: "Expandir Press de banca" })).toBeVisible();
+  await expand(page, "Press de banca");
   await expect(page.getByLabel("Peso serie 4 de Press de banca", { exact: false })).toHaveValue("42,5");
   await expect(page.getByLabel("Repeticiones serie 2 de Dominadas")).toHaveValue("8");
   await expect(page.getByLabel("Peso serie 1 de Dominadas", { exact: false })).toHaveValue("");
@@ -318,10 +340,12 @@ test("cuenta A: corrige una sesión anterior desde el historial", async ({ brows
   await expect(page.locator(".list > li")).toHaveCount(2);
   await shot(page, "10-historial");
   await page.locator(`a[href="/sesiones/${sessionA1}"]`).click();
+  await expand(page, "Press de banca");
   await setSet(page, "Press de banca", 2, "46,25", "9");
   await page.getByRole("button", { name: "Quitar serie 3 de Press de banca" }).click();
   await saved(page);
   await page.reload();
+  await expand(page, "Press de banca");
   await expect(page.getByLabel("Peso serie 2 de Press de banca", { exact: false })).toHaveValue("46,25");
   await expect(page.getByLabel("Peso serie 3 de Press de banca", { exact: false })).toHaveValue("42,5");
   await expect(page.getByLabel("Peso serie 4 de Press de banca", { exact: false })).toHaveCount(0);
