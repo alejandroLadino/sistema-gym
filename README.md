@@ -58,7 +58,7 @@ npx supabase link --project-ref <ID_DEL_PROYECTO>
 npx supabase db push
 ```
 
-(También puedes pegar el contenido del archivo SQL en el *SQL Editor* del panel.)
+(También puedes pegar cada archivo de `supabase/migrations/` en el *SQL Editor*, **en orden por nombre** y una sola vez cada uno.)
 
 **Supabase local**
 

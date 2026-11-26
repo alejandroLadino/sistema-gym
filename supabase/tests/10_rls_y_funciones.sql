@@ -325,3 +325,15 @@ end $$;
 reset role;
 
 \echo '   RLS, idempotencia, decimales, historial y progreso: OK'
+
+-- 8. Las funciones auxiliares SECURITY DEFINER no se exponen por la API -------------
+do $$
+begin
+  assert not exists (
+    select 1 from pg_proc p
+    where p.pronamespace = 'public'::regnamespace and p.prosecdef and p.proname <> 'handle_new_user'
+  ), 'Ninguna función SECURITY DEFINER invocable debe quedar en el esquema public';
+  assert to_regprocedure('private.current_user_can_train()') is not null, 'Falta private.current_user_can_train';
+  assert not has_schema_privilege('anon', 'private', 'usage'), 'anon no debe usar el esquema private';
+end $$;
+\echo '   Funciones auxiliares fuera de la API: OK'
