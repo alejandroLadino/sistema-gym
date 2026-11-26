@@ -116,8 +116,8 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
     if (pending) revision.current = 1;
     draftRef.current = loaded;
     setDraft(loaded);
-    // Con varios ejercicios, solo el último queda abierto.
-    setCollapsed(Object.fromEntries(loaded.exercises.slice(0, -1).map((e) => [e.key, true])));
+    // Al entrar a una sesión, todas las tarjetas empiezan cerradas.
+    setCollapsed(Object.fromEntries(loaded.exercises.map((e) => [e.key, true])));
   }, [initial, userId]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
