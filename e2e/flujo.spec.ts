@@ -71,6 +71,27 @@ async function addExercise(page: Page, name: string, opts: { create?: boolean; m
   await expect(dialog).toBeHidden();
 }
 
+/** Fila del catálogo en la pestaña «Ejercicios». */
+const catalogRow = (page: Page, name: string) => page.locator(".catalog-list li").filter({ hasText: name });
+
+/** Abre el panel «Nuevo ejercicio» desde el encabezado fijo. */
+async function openNewExercise(page: Page) {
+  await page.locator(".catalog-head").getByRole("button", { name: "Nuevo ejercicio" }).click();
+  const sheet = page.getByRole("dialog", { name: "Nuevo ejercicio" });
+  await expect(sheet).toBeVisible();
+  return sheet;
+}
+
+/** Crea un ejercicio desde el panel de la pestaña «Ejercicios». */
+async function createInCatalog(page: Page, name: string, group: string) {
+  const sheet = await openNewExercise(page);
+  await sheet.getByLabel("Nombre").fill(name);
+  await sheet.getByLabel("Grupo muscular").selectOption({ label: group });
+  await sheet.getByRole("button", { name: "Crear ejercicio" }).click();
+  await expect(sheet).toBeHidden();
+  await expect(page.getByRole("status").filter({ hasText: `«${name}» creado` })).toBeVisible();
+}
+
 /** Expande un ejercicio colapsado del editor (si ya está abierto, no hace nada). */
 async function expand(page: Page, exercise: string) {
   await expect(page.getByRole("button", { name: new RegExp(`^(Expandir|Colapsar) ${exercise}$`) })).toBeVisible();
@@ -361,16 +382,7 @@ test("cuenta A: modal «Agregar ejercicio» por grupo muscular", async ({ browse
   await expect(page.getByRole("region", { name: "Aperturas con mancuernas" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Dominadas" })).toHaveCount(1);
   await page.goto("/ejercicios");
-  await expect(page.locator(".list .card").filter({ hasText: "Aperturas con mancuernas" })).toContainText("Pecho");
-
-  // En «Ejercicios» también se rechaza guardar sin grupo (validación del servidor).
-  const nuevo = page.locator("section").filter({ has: page.getByRole("heading", { name: "Nuevo ejercicio" }) });
-  await nuevo.getByLabel("Nombre").fill("Sin grupo");
-  await nuevo.getByRole("button", { name: "Crear ejercicio" }).click();
-  await expect(nuevo.getByText("Selecciona un grupo muscular")).toBeVisible();
-  await expect(nuevo.getByLabel("Nombre")).toHaveValue("Sin grupo");
-  await expect(page.locator(".list .card").filter({ hasText: "Sin grupo" })).toHaveCount(0);
-  await shot(page, "09e-ejercicios-sin-grupo");
+  await expect(catalogRow(page, "Aperturas con mancuernas")).toContainText("Pecho");
 
   // Las sesiones anteriores siguen mostrando sus ejercicios.
   await page.goto(`/sesiones/${sessionA1}`);
@@ -379,53 +391,155 @@ test("cuenta A: modal «Agregar ejercicio» por grupo muscular", async ({ browse
   await page.context().close();
 });
 
-test("cuenta A: grupos musculares del catálogo, búsqueda y filtro", async ({ browser }) => {
+test("cuenta A: pestaña «Ejercicios»: crear, buscar, filtrar, editar y archivar", async ({ browser }) => {
   const page = await newPage(browser);
   await login(page, userA.email, userA.final);
   await page.getByRole("navigation").getByRole("link", { name: "Ejercicios" }).click();
   await expect(page.getByRole("heading", { name: "Ejercicios", level: 1 })).toBeVisible();
 
-  // Los grupos elegidos al crear el ejercicio aparecen con el nombre del catálogo.
-  await expect(page.locator(".list .card").filter({ hasText: "Press de banca" })).toContainText("Pecho");
-  await expect(page.locator(".list .card").filter({ hasText: "Dominadas" })).toContainText("Espalda");
+  // El botón «+ Nuevo ejercicio» se ve al entrar, antes de la búsqueda y los filtros.
+  const nuevoBtn = page.locator(".catalog-head").getByRole("button", { name: "Nuevo ejercicio" });
+  await expect(nuevoBtn).toBeInViewport();
+  const btnBox = (await nuevoBtn.boundingBox())!;
+  const searchBox = (await page.getByLabel("Buscar ejercicio").boundingBox())!;
+  expect(btnBox.y).toBeLessThan(searchBox.y);
+  await expect(catalogRow(page, "Press de banca")).toContainText("Pecho");
+  await expect(catalogRow(page, "Dominadas")).toContainText("Espalda");
+  await shot(page, "11a-ejercicios");
 
-  // El formulario de nuevo ejercicio ofrece solo la lista predefinida.
-  const nuevo = page.locator("section").filter({ has: page.getByRole("heading", { name: "Nuevo ejercicio" }) });
-  const select = nuevo.getByLabel("Grupo muscular");
-  await expect(select.locator("option")).toHaveCount(18); // 17 grupos + «Sin grupo muscular»
-  await nuevo.getByLabel("Nombre").fill("Curl de bíceps");
-  await select.selectOption({ label: "Bíceps" });
-  await nuevo.getByRole("button", { name: "Crear ejercicio" }).click();
-  await expect(nuevo.getByText("«Curl de bíceps» agregado")).toBeVisible();
-  await expect(page.locator(".list .card").filter({ hasText: "Curl de bíceps" })).toContainText("Bíceps");
+  // Crear al entrar; la lista se actualiza y aparece una confirmación breve.
+  let sheet = await openNewExercise(page);
+  await expect(sheet.getByLabel("Grupo muscular").locator("option")).toHaveCount(18); // 17 grupos + «Selecciona un grupo»
+  await shot(page, "11b-panel-nuevo");
+  await sheet.getByRole("button", { name: "Cancelar" }).click();
+  await createInCatalog(page, "Curl de bíceps", "Bíceps");
+  await expect(catalogRow(page, "Curl de bíceps")).toContainText("Bíceps");
 
-  // Buscar por el nombre del grupo, en minúsculas y sin tilde.
-  await page.getByRole("searchbox", { name: "Buscar" }).fill("biceps");
-  await page.getByRole("button", { name: "Buscar" }).click();
-  await expect(page.locator(".list > li")).toHaveCount(1);
-  await expect(page.locator(".list")).toContainText("Curl de bíceps");
+  // Búsqueda al escribir (sin pulsar «Buscar»), por nombre o grupo, y botón para limpiar.
+  await page.getByLabel("Buscar ejercicio").fill("biceps");
+  await expect(page.locator(".catalog-list li")).toHaveCount(1);
+  await expect(page.locator(".catalog-list")).toContainText("Curl de bíceps");
+  await page.getByRole("button", { name: "Limpiar búsqueda" }).click();
+  await expect(page.getByLabel("Buscar ejercicio")).toHaveValue("");
+  await expect(page.locator(".catalog-list li")).toHaveCount(4);
 
-  // Filtrar por grupo.
-  await page.goto("/ejercicios");
-  await page.getByRole("search").getByLabel("Grupo muscular").selectOption({ label: "Espalda" });
-  await page.getByRole("button", { name: "Buscar" }).click();
-  await expect(page).toHaveURL(/grupo=espalda/);
-  await expect(page.locator(".list > li")).toHaveCount(1);
-  await expect(page.locator(".list")).toContainText("Dominadas");
-  await shot(page, "09b-ejercicios-filtro-grupo");
+  // Búsqueda sin coincidencias → «Limpiar filtros».
+  await page.getByLabel("Buscar ejercicio").fill("zzzz");
+  await expect(page.getByText("Ningún ejercicio coincide con los filtros.")).toBeVisible();
+  await page.getByRole("button", { name: "Limpiar filtros" }).click();
+  await expect(page.locator(".catalog-list li")).toHaveCount(4);
 
-  // Cambiar el grupo de un ejercicio desde su ficha.
-  await page.locator(".list").getByRole("link", { name: /Dominadas/ }).click();
-  await expect(page.getByRole("heading", { name: "Dominadas", level: 1 })).toBeVisible();
-  await page.getByLabel("Grupo muscular").selectOption({ label: "Bíceps" });
-  await page.getByRole("button", { name: "Guardar cambios" }).click();
-  await expect(page.getByText("Cambios guardados.")).toBeVisible();
+  // Filtro «Pecho»: solo sus ejercicios; el formulario precarga Pecho y permite cambiarlo.
+  const filtros = page.getByRole("group", { name: "Filtrar por grupo muscular" });
+  await expect(filtros.getByRole("button", { name: "Todos", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await filtros.getByRole("button", { name: "Pecho", exact: true }).click();
+  await expect(filtros.getByRole("button", { name: "Pecho", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page).toHaveURL(/grupo=pecho/);
+  await expect(page.locator(".catalog-list li")).toHaveCount(2);
+  sheet = await openNewExercise(page);
+  await expect(sheet.getByLabel("Grupo muscular")).toHaveValue("pecho");
+  await sheet.getByLabel("Grupo muscular").selectOption({ label: "Hombros" });
+  await expect(sheet.getByLabel("Grupo muscular")).toHaveValue("hombros");
+
+  // Grupo vacío: se rechaza y se conservan los campos.
+  await sheet.getByLabel("Nombre").fill("Elevaciones laterales");
+  await sheet.getByLabel("Grupo muscular").selectOption("");
+  await sheet.getByRole("button", { name: "Crear ejercicio" }).click();
+  await expect(sheet.getByText("Selecciona un grupo muscular")).toBeVisible();
+  await expect(sheet.getByLabel("Nombre")).toHaveValue("Elevaciones laterales");
+  await shot(page, "11c-panel-sin-grupo");
+
+  // Guardado con un grupo oculto por el filtro: se conservan los filtros y se ofrece «Ver ejercicio».
+  await sheet.getByLabel("Grupo muscular").selectOption({ label: "Hombros" });
+  await sheet.getByRole("button", { name: "Crear ejercicio" }).dblclick(); // doble toque: un solo envío
+  await expect(sheet).toBeHidden();
+  const toast = page.getByRole("status").filter({ hasText: "«Elevaciones laterales» creado" });
+  await expect(toast).toBeVisible();
+  await expect(filtros.getByRole("button", { name: "Pecho", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await toast.getByRole("button", { name: "Ver ejercicio" }).click();
+  await expect(filtros.getByRole("button", { name: "Hombros", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(catalogRow(page, "Elevaciones laterales")).toHaveCount(1);
+  await expect(catalogRow(page, "Elevaciones laterales")).toHaveAttribute("data-highlight", "true");
+
+  // Editar tocando toda la fila.
+  await filtros.getByRole("button", { name: "Todos", exact: true }).click();
+  await catalogRow(page, "Dominadas").getByRole("button").click();
+  sheet = page.getByRole("dialog", { name: "Editar ejercicio" });
+  await expect(sheet.getByLabel("Nombre")).toHaveValue("Dominadas");
+  await expect(sheet.getByLabel("Grupo muscular")).toHaveValue("espalda");
+  await sheet.getByLabel("Nombre").fill("Dominadas pronas");
+  await sheet.getByRole("button", { name: "Guardar cambios" }).click();
+  await expect(sheet).toBeHidden();
+  await expect(page.getByRole("status").filter({ hasText: "Cambios guardados" })).toBeVisible();
+  await expect(catalogRow(page, "Dominadas pronas")).toHaveCount(1);
   await page.reload();
-  await expect(page.getByLabel("Grupo muscular")).toHaveValue("biceps");
-  await page.getByLabel("Grupo muscular").selectOption({ label: "Espalda" });
-  await page.getByRole("button", { name: "Guardar cambios" }).click();
-  await expect(page.getByText("Cambios guardados.")).toBeVisible();
+  await catalogRow(page, "Dominadas pronas").getByRole("button").click();
+  await sheet.getByLabel("Nombre").fill("Dominadas");
+  await sheet.getByRole("button", { name: "Guardar cambios" }).click();
+  await expect(sheet).toBeHidden();
+
+  // Archivar y restaurar.
+  await catalogRow(page, "Curl de bíceps").getByRole("button").click();
+  await sheet.getByRole("button", { name: "Archivar ejercicio" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "«Curl de bíceps» archivado" })).toBeVisible();
+  await expect(catalogRow(page, "Curl de bíceps")).toHaveCount(0);
+  const vista = page.getByRole("group", { name: "Vista" });
+  await vista.getByRole("button", { name: /Archivados/ }).click();
+  await expect(vista.getByRole("button", { name: /Archivados/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(catalogRow(page, "Curl de bíceps")).toHaveCount(1);
+  await catalogRow(page, "Curl de bíceps").getByRole("button").click();
+  await sheet.getByRole("button", { name: "Restaurar ejercicio" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "«Curl de bíceps» restaurado" })).toBeVisible();
+  await vista.getByRole("button", { name: /Activos/ }).click();
+  await expect(catalogRow(page, "Curl de bíceps")).toHaveCount(1);
+  await page.reload();
+  await expect(catalogRow(page, "Curl de bíceps")).toHaveCount(1);
+
+  // Lista larga: el encabezado sigue visible al desplazarse y permite crear desde abajo.
+  for (let i = 1; i <= 12; i++) await createInCatalog(page, `Cardio ${String(i).padStart(2, "0")}`, "Cardio");
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await expect(nuevoBtn).toBeInViewport();
+  await createInCatalog(page, "Creado al final", "Pantorrillas");
+
+  // La navegación inferior no tapa la última fila.
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(300);
+  const lastRow = (await page.locator(".catalog-list li").last().boundingBox())!;
+  const nav = (await page.getByRole("navigation", { name: "Navegación principal" }).boundingBox())!;
+  expect(lastRow.y + lastRow.height).toBeLessThanOrEqual(nav.y);
+  await shot(page, "11d-lista-larga");
   await page.context().close();
+});
+
+test("cuenta A: panel de ejercicio a 375 px con el teclado abierto", async ({ browser }) => {
+  // Teclado abierto en un iPhone de 375 × 812: queda ~400 px de área visible.
+  const context = await browser.newContext({ viewport: { width: 375, height: 400 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  await login(page, userA.email, userA.final);
+  await page.goto("/ejercicios?grupo=pecho");
+  const sheet = await openNewExercise(page);
+  for (const campo of ["Nombre", "Grupo muscular", "Notas (opcional)"]) {
+    const el = sheet.getByLabel(campo);
+    await el.scrollIntoViewIfNeeded();
+    await expect(el).toBeInViewport();
+  }
+  const save = sheet.getByRole("button", { name: "Crear ejercicio" });
+  await expect(save).toBeInViewport({ ratio: 1 });
+  const box = (await save.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(400);
+  // Nada tapa el botón (ni la navegación inferior).
+  const encima = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.textContent ?? "", {
+    x: box.x + box.width / 2,
+    y: box.y + box.height / 2,
+  });
+  expect(encima).toContain("Crear ejercicio");
+  await sheet.getByLabel("Nombre").fill("Press inclinado");
+  await sheet.getByLabel("Notas (opcional)").fill("Banco a 30°");
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/11e-375-teclado.png` });
+  await save.click();
+  await expect(sheet).toBeHidden();
+  await expect(catalogRow(page, "Press inclinado")).toContainText("Pecho");
+  await context.close();
 });
 
 test("cuenta A: corrige una sesión anterior desde el historial", async ({ browser }) => {
@@ -457,6 +571,7 @@ test("cuenta B no accede a los datos de A, ni por URL directa", async ({ browser
 
   await page.goto("/ejercicios");
   await expect(page.getByText("Tu catálogo está vacío.")).toBeVisible();
+  await expect(page.locator(".empty").getByRole("button", { name: "Nuevo ejercicio" })).toBeVisible();
   await page.goto("/historial");
   await expect(page.getByText("Aún no tienes sesiones registradas.")).toBeVisible();
   for (const url of [`/sesiones/${sessionA1}`, `/progreso/${pressId}`, `/ejercicios/${pressId}`]) {
