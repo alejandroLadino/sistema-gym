@@ -35,7 +35,7 @@ do $$
 declare ok boolean := false;
 begin
   begin
-    insert into public.exercises (name) values ('Press de banca');
+    insert into public.exercises (name, muscle_group_id) values ('Press de banca', 'pecho');
   exception when insufficient_privilege then ok := true;
   end;
   assert ok, 'Con contraseña temporal pendiente no se debe poder crear ejercicios';
@@ -60,7 +60,7 @@ do $$
 declare ok boolean := false;
 begin
   begin
-    insert into public.exercises (name) values ('  press de BANCA ');
+    insert into public.exercises (name, muscle_group_id) values ('  press de BANCA ', 'pecho');
   exception when unique_violation then ok := true;
   end;
   assert ok, 'No se permiten dos ejercicios activos con el mismo nombre';
@@ -226,7 +226,7 @@ begin
   -- Insertar filas con el user_id de Ana.
   ok := false;
   begin
-    insert into public.exercises (user_id, name) values ('aaaaaaaa-0000-0000-0000-000000000001', 'Falso');
+    insert into public.exercises (user_id, name, muscle_group_id) values ('aaaaaaaa-0000-0000-0000-000000000001', 'Falso', 'pecho');
   exception when insufficient_privilege then ok := true;
   end;
   assert ok, 'No se puede crear datos a nombre de otra persona';
@@ -269,7 +269,7 @@ do $$
 declare ok boolean := false;
 begin
   begin
-    insert into public.exercises (name) values ('Sentadilla');
+    insert into public.exercises (name, muscle_group_id) values ('Sentadilla', 'cuadriceps');
   exception when insufficient_privilege then ok := true;
   end;
   assert ok, 'Una cuenta inactiva no puede crear datos';
@@ -369,8 +369,13 @@ begin
   assert ok, 'Solo se aceptan ids del catálogo';
 
   insert into public.exercises (name, muscle_group_id) values ('Curl de bíceps', 'biceps');
-  insert into public.exercises (name) values ('Burpees');
-  assert (select count(*) from public.exercises where muscle_group_id is null) = 1, 'El grupo es opcional';
+
+  ok := false;
+  begin
+    insert into public.exercises (name) values ('Burpees');
+  exception when check_violation or not_null_violation then ok := true;
+  end;
+  assert ok, 'El grupo muscular es obligatorio';
 end $$;
 reset role;
 

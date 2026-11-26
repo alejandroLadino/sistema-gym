@@ -254,6 +254,8 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
   // --- Acciones del usuario ------------------------------------------------------
   const addExercise = (exercise: Exercise) => {
     setPickerOpen(false);
+    // Doble toque o reintento: un ejercicio ya presente no se agrega otra vez.
+    if (draftRef.current?.exercises.some((e) => e.exerciseId === exercise.id)) return;
     // El nuevo ejercicio queda abierto; los demás se colapsan.
     const existing = draftRef.current?.exercises ?? [];
     setCollapsed(Object.fromEntries(existing.map((e) => [e.key, true])));
@@ -551,10 +553,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
           inSession={inSession}
           onClose={() => setPickerOpen(false)}
           onPick={addExercise}
-          onCreated={(exercise) => {
-            setCatalog((c) => [...c, exercise]);
-            addExercise(exercise);
-          }}
+          onCreated={(exercise) => setCatalog((c) => (c.some((x) => x.id === exercise.id) ? c : [...c, exercise]))}
         />
       ) : null}
     </div>

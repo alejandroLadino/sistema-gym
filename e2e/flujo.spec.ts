@@ -50,15 +50,23 @@ async function setSet(page: Page, exercise: string, n: number, weight: string, r
   await page.getByLabel(`Repeticiones serie ${n} de ${exercise}`).fill(reps);
 }
 
-async function addExercise(page: Page, name: string, opts: { create?: boolean; muscle?: string } = {}) {
-  await page.getByRole("button", { name: "Agregar ejercicio" }).click();
-  const dialog = page.getByRole("dialog", { name: "Agregar ejercicio" });
-  await dialog.getByLabel("Buscar o escribir un ejercicio nuevo").fill(name);
+/**
+ * Agrega un ejercicio desde el modal. Con `create`, lo crea con «+ Crear ejercicio»:
+ * el texto del buscador queda como nombre y se elige el grupo si no viene precargado.
+ */
+async function addExercise(page: Page, name: string, opts: { create?: boolean; muscle?: string; chip?: string } = {}) {
+  await page.getByRole("button", { name: "Agregar ejercicio", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Agregar ejercicio" })).toBeVisible();
+  if (opts.chip) await dialog.getByRole("button", { name: opts.chip, exact: true }).click();
+  await dialog.getByLabel("Buscar ejercicio").fill(name);
   if (opts.create) {
-    if (opts.muscle) await dialog.getByLabel("Grupo muscular (opcional)").selectOption({ label: opts.muscle });
-    await dialog.getByRole("button", { name: `Crear «${name}»` }).click();
+    await dialog.locator(".picker-foot").getByRole("button", { name: "Crear ejercicio" }).click();
+    await expect(dialog.getByLabel("Nombre del ejercicio")).toHaveValue(name);
+    if (opts.muscle) await dialog.getByLabel("Grupo muscular").selectOption({ label: opts.muscle });
+    await dialog.getByRole("button", { name: "Crear y agregar a la sesión" }).click();
   } else {
-    await dialog.getByRole("listitem").filter({ hasText: name }).first().click();
+    await dialog.getByRole("listitem").filter({ hasText: name }).first().getByRole("button").click();
   }
   await expect(dialog).toBeHidden();
 }
@@ -282,6 +290,92 @@ test("cuenta A: días después reutiliza el ejercicio y copia la última sesión
   await expect(page.locator("table.data")).toContainText("10 reps");
   await expect(page.locator("table.data")).toContainText("18 reps");
   await shot(page, "09-progreso-peso-corporal");
+  await page.context().close();
+});
+
+test("cuenta A: modal «Agregar ejercicio» por grupo muscular", async ({ browser }) => {
+  const page = await newPage(browser);
+  await login(page, userA.email, userA.final);
+  // Sesión de hoy (la más reciente del historial).
+  await page.getByRole("navigation").getByRole("link", { name: "Historial" }).click();
+  await page.locator(".list > li").first().getByRole("link").click();
+  await expect(page.getByRole("heading", { name: "Sesión de entrenamiento" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Agregar ejercicio", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  const filtros = dialog.getByRole("group", { name: "Filtrar por grupo muscular" });
+  await expect(filtros.getByRole("button", { name: "Todos", exact: true })).toHaveAttribute("aria-pressed", "true");
+
+  // «Pecho»: solo sus ejercicios; Press de banca ya está en la sesión.
+  await filtros.getByRole("button", { name: "Pecho", exact: true }).click();
+  await expect(filtros.getByRole("button", { name: "Pecho", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByRole("listitem")).toHaveCount(1);
+  await expect(dialog.getByRole("listitem")).toContainText("Press de banca");
+  await expect(dialog.getByRole("listitem")).toContainText("En la sesión");
+  await expect(dialog.getByRole("listitem").getByRole("button")).toBeDisabled();
+  await shot(page, "09c-modal-pecho");
+
+  // Grupo sin ejercicios vs. búsqueda sin resultados; «+ Crear ejercicio» en ambos.
+  await filtros.getByRole("button", { name: "Hombros", exact: true }).click();
+  await expect(dialog.getByText("Aún no tienes ejercicios de Hombros.")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Crear ejercicio" })).toHaveCount(2);
+  await filtros.getByRole("button", { name: "Pecho", exact: true }).click();
+  await dialog.getByLabel("Buscar ejercicio").fill("Aperturas");
+  await expect(dialog.getByText("Ningún ejercicio de Pecho coincide con «Aperturas».")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Crear ejercicio" })).toHaveCount(2);
+
+  // Crear desde «Pecho»: nombre y grupo precargados; cancelar conserva filtro y búsqueda.
+  await dialog.locator(".picker-foot").getByRole("button", { name: "Crear ejercicio" }).click();
+  await expect(dialog.getByLabel("Nombre del ejercicio")).toHaveValue("Aperturas");
+  await expect(dialog.getByLabel("Grupo muscular")).toHaveValue("pecho");
+  await shot(page, "09d-modal-crear");
+  await dialog.getByRole("button", { name: "Cancelar" }).click();
+  await expect(filtros.getByRole("button", { name: "Pecho", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByLabel("Buscar ejercicio")).toHaveValue("Aperturas");
+  await dialog.locator(".picker-foot").getByRole("button", { name: "Crear ejercicio" }).click();
+  await dialog.getByLabel("Nombre del ejercicio").fill("Aperturas con mancuernas");
+  await dialog.getByRole("button", { name: "Crear y agregar a la sesión" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("region", { name: "Aperturas con mancuernas" })).toBeVisible();
+  await saved(page);
+
+  // Desde «Todos» el grupo se elige explícitamente: sin grupo se rechaza.
+  await page.getByRole("button", { name: "Agregar ejercicio", exact: true }).click();
+  await dialog.locator(".picker-foot").getByRole("button", { name: "Crear ejercicio" }).click();
+  await expect(dialog.getByLabel("Grupo muscular")).toHaveValue("");
+  await dialog.getByLabel("Nombre del ejercicio").fill("Fondos");
+  await dialog.getByRole("button", { name: "Crear y agregar a la sesión" }).click();
+  await expect(dialog.getByText("Selecciona un grupo muscular")).toBeVisible();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancelar" }).click();
+
+  // Doble toque sobre un ejercicio disponible: se agrega una sola vez.
+  await dialog.getByLabel("Buscar ejercicio").fill("Dominadas");
+  await dialog.getByRole("listitem").filter({ hasText: "Dominadas" }).getByRole("button").dblclick();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("region", { name: "Dominadas" })).toHaveCount(1);
+  await saved(page);
+
+  // Tras recargar: el nuevo ejercicio sigue en la sesión y en el catálogo, con Pecho.
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Aperturas con mancuernas" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Dominadas" })).toHaveCount(1);
+  await page.goto("/ejercicios");
+  await expect(page.locator(".list .card").filter({ hasText: "Aperturas con mancuernas" })).toContainText("Pecho");
+
+  // En «Ejercicios» también se rechaza guardar sin grupo (validación del servidor).
+  const nuevo = page.locator("section").filter({ has: page.getByRole("heading", { name: "Nuevo ejercicio" }) });
+  await nuevo.getByLabel("Nombre").fill("Sin grupo");
+  await nuevo.getByRole("button", { name: "Crear ejercicio" }).click();
+  await expect(nuevo.getByText("Selecciona un grupo muscular")).toBeVisible();
+  await expect(nuevo.getByLabel("Nombre")).toHaveValue("Sin grupo");
+  await expect(page.locator(".list .card").filter({ hasText: "Sin grupo" })).toHaveCount(0);
+  await shot(page, "09e-ejercicios-sin-grupo");
+
+  // Las sesiones anteriores siguen mostrando sus ejercicios.
+  await page.goto(`/sesiones/${sessionA1}`);
+  await expect(page.getByRole("region", { name: "Press de banca" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Dominadas" })).toBeVisible();
   await page.context().close();
 });
 
