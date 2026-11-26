@@ -42,3 +42,6 @@ export const IconMore = () => (
 export const IconChevronDown = () => (
   <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
 );
+export const IconCheck = () => (
+  <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><path d="m5 12 5 5 9-10" /></svg>
+);

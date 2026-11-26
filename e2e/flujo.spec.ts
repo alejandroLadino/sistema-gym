@@ -161,7 +161,7 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
   await expect(page).toHaveURL(/\/$/);
   await shot(page, "03-inicio-vacio");
 
-  await page.getByRole("link", { name: "Registrar entrenamiento" }).click();
+  await page.goto("/entrenar");
   await page.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(7));
 
   await addExercise(page, "Press de banca", { create: true, muscle: "Pecho" });
@@ -268,7 +268,7 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
 test("cuenta A: días después reutiliza el ejercicio y copia la última sesión", async ({ browser }) => {
   const page = await newPage(browser);
   await login(page, userA.email, userA.final);
-  await page.getByRole("link", { name: "Registrar entrenamiento" }).click();
+  await page.goto("/entrenar");
   await expect(page.getByLabel("Fecha del entrenamiento")).toHaveValue(isoDaysAgo(0));
 
   await addExercise(page, "press");
@@ -575,7 +575,7 @@ test("cuenta A: Progreso: lista, detalle, métricas, rangos y correcciones", asy
   await login(page, userA.email, userA.final);
 
   // Sesión 1 (hace 10 días): Remo 40 kg × 10, 10, 8.
-  await page.getByRole("link", { name: "Registrar entrenamiento" }).click();
+  await page.goto("/entrenar");
   await page.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(10));
   await addExercise(page, "Remo con barra", { create: true, muscle: "Espalda" });
   const remo = page.getByRole("region", { name: "Remo con barra" });
@@ -826,6 +826,161 @@ test("cuenta A: editor de sesión a 375 px", async ({ browser }) => {
   const page = await context.newPage();
   await login(page, userA.email, userA.final);
   await editorFlow(page, "movil", true);
+  await context.close();
+});
+
+test("Inicio: hoy, semana, sesiones recientes y repetir ejercicios (375 px)", async ({ browser }) => {
+  const userC = { email: `carla.${run}@example.com`, temp: "Temporal456", final: "CarlaSegura789" };
+  const admin = await newPage(browser);
+  await login(admin, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await admin.goto("/admin");
+  const form = admin.getByRole("form", { name: "Crear cuenta" });
+  await form.getByLabel("Correo").fill(userC.email);
+  await form.getByLabel("Contraseña inicial").fill(userC.temp);
+  await form.getByRole("button", { name: "Crear cuenta" }).click();
+  await expect(form.getByText(`Cuenta creada para ${userC.email}`)).toBeVisible();
+  await admin.context().close();
+
+  const context = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  await login(page, userC.email, userC.temp);
+  await page.getByLabel("Nueva contraseña", { exact: true }).fill(userC.final);
+  await page.getByLabel("Repite la nueva contraseña").fill(userC.final);
+  await page.getByRole("button", { name: "Guardar contraseña" }).click();
+  await expect(page).toHaveURL(/\/$/);
+
+  // Usuario nuevo: la acción principal se ve al entrar.
+  const hoy = page.locator(".today-card");
+  await expect(hoy.getByRole("link", { name: "Iniciar entrenamiento" })).toBeInViewport();
+  await expect(page.getByText("0 sesiones finalizadas")).toBeVisible();
+  await expect(page.locator('.week-day[aria-current="date"]')).toHaveCount(1);
+  await expect(page.locator(".week-day[data-trained]")).toHaveCount(0);
+  await expect(page.getByText("Aún no tienes sesiones finalizadas.")).toBeVisible();
+  await shot(page, "14a-inicio-nuevo");
+
+  // Sesión antigua (hace 10 días, otra semana): Press militar y Remo C, finalizada.
+  await page.goto("/entrenar");
+  await page.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(10));
+  await addExercise(page, "Press militar", { create: true, muscle: "Hombros" });
+  let card = page.getByRole("region", { name: "Press militar" });
+  await card.getByLabel("Repeticiones por serie de Press militar").fill("10");
+  await card.getByLabel("Peso por serie de Press militar", { exact: false }).fill("30");
+  await card.getByRole("button", { name: "Agregar 3 series" }).click();
+  await addExercise(page, "Remo C", { create: true, muscle: "Espalda" });
+  card = page.getByRole("region", { name: "Remo C" });
+  await card.getByLabel("Repeticiones por serie de Remo C").fill("12");
+  await card.getByLabel("Peso por serie de Remo C", { exact: false }).fill("40");
+  await card.getByRole("button", { name: "Agregar 3 series" }).click();
+  await saved(page);
+  const oldId = page.url().split("/").pop()!;
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial$/);
+
+  // Iniciar hoy → sesión en curso; Inicio ofrece continuarla, también al recargar.
+  await page.getByRole("navigation").getByRole("link", { name: "Inicio" }).click();
+  await hoy.getByRole("link", { name: "Iniciar entrenamiento" }).click();
+  await addExercise(page, "Press militar");
+  card = page.getByRole("region", { name: "Press militar" });
+  await card.getByLabel("Cantidad de series de Press militar").fill("2");
+  await card.getByLabel("Repeticiones por serie de Press militar").fill("10");
+  await card.getByLabel("Peso por serie de Press militar", { exact: false }).fill("32,5");
+  await card.getByRole("button", { name: "Agregar 2 series" }).click();
+  await saved(page);
+  const todayId = page.url().split("/").pop()!;
+  await page.getByRole("navigation").getByRole("link", { name: "Inicio" }).click();
+  await expect(hoy.getByRole("link", { name: "Continuar entrenamiento" })).toBeVisible();
+  await expect(hoy).toContainText("En curso");
+  await page.reload();
+  await expect(hoy.getByRole("link", { name: "Continuar entrenamiento" })).toHaveAttribute("href", `/sesiones/${todayId}`);
+  await shot(page, "14b-inicio-en-curso");
+  await hoy.getByRole("link", { name: "Continuar entrenamiento" }).click();
+  await expect(page).toHaveURL(new RegExp(`/sesiones/${todayId}$`));
+
+  // Finalizar → «Ver entrenamiento de hoy» + «Nueva sesión».
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial$/);
+  await page.getByRole("navigation").getByRole("link", { name: "Inicio" }).click();
+  await expect(hoy.getByRole("link", { name: "Ver entrenamiento de hoy" })).toBeVisible();
+  await expect(hoy.getByRole("link", { name: "Nueva sesión" })).toBeVisible();
+  await expect(page.getByText("1 sesión finalizada")).toBeVisible();
+  await expect(page.locator('.week-day[aria-current="date"][data-trained]')).toHaveCount(1);
+  // Abrir una sesión finalizada muestra su estado.
+  await hoy.getByRole("link", { name: "Ver entrenamiento de hoy" }).click();
+  await expect(page.locator(".session-head").getByText("Finalizada")).toBeVisible();
+  await page.goBack();
+
+  // Segunda sesión el mismo día: el día se marca una vez y el total suma ambas.
+  await hoy.getByRole("link", { name: "Nueva sesión" }).click();
+  await addExercise(page, "Remo C");
+  card = page.getByRole("region", { name: "Remo C" });
+  await card.getByLabel("Cantidad de series de Remo C").fill("1");
+  await card.getByLabel("Repeticiones por serie de Remo C").fill("12");
+  await card.getByLabel("Peso por serie de Remo C", { exact: false }).fill("40");
+  await card.getByRole("button", { name: "Agregar 1 serie" }).click();
+  await saved(page);
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial$/);
+  await page.getByRole("navigation").getByRole("link", { name: "Inicio" }).click();
+  await expect(page.getByText("2 sesiones finalizadas")).toBeVisible();
+  await expect(page.locator(".week-day[data-trained]")).toHaveCount(1);
+  await expect(page.locator('.week-day[aria-current="date"]')).toContainText("entrenado (2 sesiones)");
+  const recientes = page.getByRole("list", { name: "Sesiones recientes" }).locator("li");
+  await expect(recientes).toHaveCount(3);
+  await expect(recientes.nth(0)).toContainText("Espalda");
+  await expect(recientes.nth(0)).toContainText("1 ejercicio · 1 serie");
+  await expect(recientes.nth(2)).toContainText("Hombros · Espalda");
+  await expect(recientes.nth(2)).toContainText("2 ejercicios · 6 series");
+  // «Ver entrenamiento de hoy» abre la más reciente de hoy.
+  await hoy.getByRole("link", { name: "Ver entrenamiento de hoy" }).click();
+  await expect(page.getByRole("region", { name: "Remo C" })).toHaveCount(1);
+  await expect(page.getByRole("region", { name: "Press militar" })).toHaveCount(0);
+
+  // Archivar Remo C y repetir la sesión antigua: se omite y se avisa.
+  await page.goto("/ejercicios");
+  await catalogRow(page, "Remo C").getByRole("button").click();
+  await page.getByRole("dialog", { name: "Editar ejercicio" }).getByRole("button", { name: "Archivar ejercicio" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "«Remo C» archivado" })).toBeVisible();
+  await page.getByRole("navigation").getByRole("link", { name: "Inicio" }).click();
+  await recientes.nth(2).getByRole("button", { name: /Repetir ejercicios/ }).dblclick(); // doble toque: una sola sesión
+  await expect(page).toHaveURL(/\/sesiones\/[0-9a-f-]{36}$/); // la URL se limpia tras mostrar el aviso
+  const repeatedId = page.url().split("/").pop()!;
+  expect(repeatedId).not.toBe(oldId);
+  await expect(page.getByText(/Sesión nueva con los ejercicios del/)).toBeVisible();
+  await expect(page.getByText("Se omitió por estar archivado: Remo C.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Remo C" })).toHaveCount(0);
+  const repetido = page.getByRole("region", { name: "Press militar" });
+  await expect(repetido.locator(".ex-summary")).toHaveText("Sin series registradas");
+  await expand(page, "Press militar");
+  await expect(repetido.locator(".previous-summary")).toHaveText("3 × 10 a 30 kg"); // referencia (sesión anterior a hoy), no copiada
+  await shot(page, "14c-repetida");
+
+  // La sesión original no cambia.
+  await page.goto(`/sesiones/${oldId}`);
+  await expect(page.getByRole("region", { name: "Press militar" }).locator(".ex-summary")).toHaveText("3 series · Mejor serie: 30 kg × 10");
+  await expect(page.getByRole("region", { name: "Remo C" }).locator(".ex-summary")).toHaveText("3 series · Mejor serie: 40 kg × 12");
+
+  // Repetir no suma series al progreso de hoy.
+  await page.goto("/progreso");
+  await page.getByRole("list", { name: "Ejercicios con registros" }).locator("li").filter({ hasText: "Press militar" }).getByRole("link").click();
+  await expect(page.locator(".history-item")).toHaveCount(2);
+
+  // Inicio: la sesión repetida queda en curso; repetir otra vez ofrece continuarla.
+  await page.goto("/");
+  await expect(hoy.getByRole("link", { name: "Continuar entrenamiento" })).toHaveAttribute("href", `/sesiones/${repeatedId}`);
+  await recientes.nth(0).getByRole("button", { name: /Repetir ejercicios/ }).click();
+  const dialogo = page.getByRole("dialog", { name: "Ya tienes un entrenamiento en curso hoy" });
+  await expect(dialogo.getByRole("button", { name: "Iniciar otra sesión" })).toBeVisible();
+  await shot(page, "14d-repetir-en-curso");
+  await dialogo.getByRole("link", { name: "Continuar entrenamiento" }).click();
+  await expect(page).toHaveURL(new RegExp(`/sesiones/${repeatedId}$`));
+
+  // A 375 px la navegación inferior deja accesible la última tarjeta.
+  await page.goto("/");
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(300);
+  const ultima = (await recientes.last().boundingBox())!;
+  const nav = (await page.getByRole("navigation", { name: "Navegación principal" }).boundingBox())!;
+  expect(ultima.y + ultima.height).toBeLessThanOrEqual(nav.y);
   await context.close();
 });
 

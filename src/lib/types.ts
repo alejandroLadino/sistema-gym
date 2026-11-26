@@ -30,6 +30,8 @@ export type SessionData = {
   session_date: string;
   notes: string | null;
   updated_at: string;
+  /** null = en curso; fecha = finalizada. */
+  finished_at?: string | null;
   exercises: {
     exercise_id: string;
     name: string;

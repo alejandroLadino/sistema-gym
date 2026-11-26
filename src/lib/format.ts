@@ -34,6 +34,13 @@ export function formatDate(iso: string, opts: { weekday?: boolean; year?: boolea
   }).format(isoToUtcDate(iso));
 }
 
+/** «jueves, 26 de noviembre». */
+export function formatLongDate(iso: string): string {
+  return new Intl.DateTimeFormat("es", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long" }).format(
+    isoToUtcDate(iso),
+  );
+}
+
 export function formatShortDate(iso: string): string {
   return new Intl.DateTimeFormat("es", { timeZone: "UTC", day: "numeric", month: "short" }).format(
     isoToUtcDate(iso),
