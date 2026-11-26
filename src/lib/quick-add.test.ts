@@ -89,3 +89,27 @@ describe("resumen de la sesión anterior", () => {
     expect(summarizeSets([{ reps: 12, weight_kg: 40 }, { reps: 12, weight_kg: 45 }])).toBe("40 kg × 12 · 45 kg × 12");
   });
 });
+
+describe("resumen del ejercicio colapsado", () => {
+  it("cuenta las series y resume sus valores", async () => {
+    const { exerciseSummary } = await import("./session-draft");
+    expect(
+      exerciseSummary([
+        { key: "1", weight: "10", reps: "12" },
+        { key: "2", weight: "10", reps: "12" },
+        { key: "3", weight: "10", reps: "12" },
+        { key: "4", weight: "15", reps: "12" },
+      ]),
+    ).toEqual({ count: 4, text: "4 series · 3 × 12 a 10 kg · 15 kg × 12", incomplete: false });
+  });
+  it("peso corporal, vacío e incompleto", async () => {
+    const { exerciseSummary } = await import("./session-draft");
+    expect(exerciseSummary([{ key: "1", weight: "", reps: "10" }])).toEqual({ count: 1, text: "1 serie · 10 reps", incomplete: false });
+    expect(exerciseSummary([])).toEqual({ count: 0, text: "Sin series", incomplete: false });
+    expect(exerciseSummary([{ key: "1", weight: "40", reps: "" }, { key: "2", weight: "40", reps: "8" }])).toEqual({
+      count: 2,
+      text: "2 series · 40 kg × 8",
+      incomplete: true,
+    });
+  });
+});

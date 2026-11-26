@@ -1,4 +1,4 @@
-import { isIsoDate } from "./format";
+import { isIsoDate, summarizeSets } from "./format";
 import type { SessionData, SetValue } from "./types";
 import { parseReps, parseWeight, type Parsed } from "./validation";
 
@@ -149,6 +149,26 @@ export function appendSets(current: DraftSet[], added: DraftSet[]): DraftSet[] {
 /** Un ejercicio está vacío si no tiene ninguna serie con datos. */
 export function hasNoSets(sets: DraftSet[]): boolean {
   return sets.every(isSetBlank);
+}
+
+/**
+ * Resumen de un ejercicio colapsado: «4 series · 3 × 12 a 10 kg · 15 kg × 12».
+ * `incomplete` indica series con datos a medias (no se pueden guardar).
+ */
+export function exerciseSummary(sets: DraftSet[]): { count: number; text: string; incomplete: boolean } {
+  const valid: SetValue[] = [];
+  let incomplete = false;
+  for (const set of sets) {
+    if (isSetBlank(set)) continue;
+    const reps = parseReps(set.reps);
+    const weight = parseWeight(set.weight);
+    if (reps.ok && weight.ok) valid.push({ reps: reps.value, weight_kg: weight.value });
+    else incomplete = true;
+  }
+  const count = sets.filter((s) => !isSetBlank(s)).length;
+  if (count === 0) return { count, text: "Sin series", incomplete };
+  const label = `${count} ${count === 1 ? "serie" : "series"}`;
+  return { count, text: valid.length ? `${label} · ${summarizeSets(valid)}` : label, incomplete };
 }
 
 /** Copia las series de la sesión anterior: reemplaza filas vacías, si no, añade. */

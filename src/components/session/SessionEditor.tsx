@@ -4,11 +4,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deleteSession, getPreviousSets, saveSession } from "@/app/actions/sessions";
-import { IconCopy, IconDown, IconPlus, IconTrash, IconUp } from "@/components/icons";
+import { IconArrowDown, IconArrowUp, IconChevron, IconCopy, IconPlus, IconTrash } from "@/components/icons";
 import { formatDate, summarizeSets, todayLocal } from "@/lib/format";
 import {
   appendSets,
   clearNewPointer,
+  exerciseSummary,
   copyPreviousSets,
   draftToPayload,
   hasNoSets,
@@ -64,6 +65,8 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
   const [prevError, setPrevError] = useState(false);
   /** Captura rápida abierta en ejercicios que ya tienen series (en los vacíos siempre se muestra). */
   const [quickOpen, setQuickOpen] = useState<Record<string, boolean>>({});
+  /** Ejercicios colapsados (solo muestran nombre y resumen). */
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const draftRef = useRef<Draft | null>(null);
   const revision = useRef(0);
@@ -110,6 +113,8 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
     if (pending) revision.current = 1;
     draftRef.current = loaded;
     setDraft(loaded);
+    // Con varios ejercicios, solo el último queda abierto.
+    setCollapsed(Object.fromEntries(loaded.exercises.slice(0, -1).map((e) => [e.key, true])));
   }, [initial, userId]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -249,6 +254,9 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
   // --- Acciones del usuario ------------------------------------------------------
   const addExercise = (exercise: Exercise) => {
     setPickerOpen(false);
+    // El nuevo ejercicio queda abierto; los demás se colapsan.
+    const existing = draftRef.current?.exercises ?? [];
+    setCollapsed(Object.fromEntries(existing.map((e) => [e.key, true])));
     update((d) => ({
       ...d,
       exercises: [
@@ -257,6 +265,8 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
       ],
     }));
   };
+
+  const toggleCollapsed = (key: string) => setCollapsed((c) => ({ ...c, [key]: !c[key] }));
 
   const updateExercise = (key: string, fn: (e: DraftExercise) => DraftExercise) =>
     update((d) => ({ ...d, exercises: d.exercises.map((e) => (e.key === key ? fn(e) : e)) }));
@@ -400,19 +410,40 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
           const empty = hasNoSets(ex.sets);
           const showQuick = empty || Boolean(quickOpen[ex.key]);
           const lastSet = ex.sets.filter((st) => !isSetBlank(st)).at(-1);
+          const summary = exerciseSummary(ex.sets);
+          const hasErrors = ex.sets.some((st) => setErrors[st.key]);
+          // Con errores visibles, el ejercicio se abre para poder corregirlos.
+          const isCollapsed = Boolean(collapsed[ex.key]) && !hasErrors;
+          const bodyId = `ejercicio-${ex.key}`;
           return (
-            <section key={ex.key} className="card exercise-card" aria-label={ex.name}>
+            <section key={ex.key} className="card exercise-card" aria-label={ex.name} data-collapsed={isCollapsed || undefined}>
               <div className="ex-head">
-                <div>
-                  <h3>{ex.name}</h3>
-                  {ex.archived ? <span className="badge">Archivado</span> : null}
-                </div>
-                <div className="row" style={{ flexWrap: "nowrap", gap: 4 }}>
+                <button
+                  type="button"
+                  className="ex-toggle"
+                  aria-expanded={!isCollapsed}
+                  aria-controls={bodyId}
+                  aria-label={`${isCollapsed ? "Expandir" : "Colapsar"} ${ex.name}`}
+                  onClick={() => toggleCollapsed(ex.key)}
+                >
+                  <span className="ex-chevron" aria-hidden="true"><IconChevron /></span>
+                  <span className="ex-title">
+                    <h3>{ex.name}</h3>
+                    {isCollapsed ? (
+                      <span className="ex-summary">
+                        {summary.text}
+                        {summary.incomplete ? <span className="badge badge-warning">Faltan datos</span> : null}
+                      </span>
+                    ) : null}
+                    {ex.archived ? <span className="badge">Archivado</span> : null}
+                  </span>
+                </button>
+                <div className="row" style={{ flexWrap: "nowrap", gap: 2 }}>
                   <button type="button" className="btn btn-ghost btn-icon" aria-label={`Subir ${ex.name}`} onClick={() => moveExercise(index, -1)} disabled={index === 0}>
-                    <IconUp />
+                    <IconArrowUp />
                   </button>
                   <button type="button" className="btn btn-ghost btn-icon" aria-label={`Bajar ${ex.name}`} onClick={() => moveExercise(index, 1)} disabled={index === draft.exercises.length - 1}>
-                    <IconDown />
+                    <IconArrowDown />
                   </button>
                   <button type="button" className="btn btn-ghost btn-icon" aria-label={`Quitar ${ex.name}`} onClick={() => removeExercise(ex)}>
                     <IconTrash />
@@ -420,85 +451,89 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
                 </div>
               </div>
 
-              <PreviousSummary
-                prev={prev}
-                loadError={prevError}
-                exerciseName={ex.name}
-                canCopy={empty}
-                onCopy={(p) => copyPrevious(ex, p)}
-              />
+              {!isCollapsed ? (
+                <div id={bodyId}>
+                  <PreviousSummary
+                    prev={prev}
+                    loadError={prevError}
+                    exerciseName={ex.name}
+                    canCopy={empty}
+                    onCopy={(p) => copyPrevious(ex, p)}
+                  />
 
-              {ex.sets.length ? (
-                <div className="set-table" role="group" aria-label={`Series de ${ex.name}`}>
-                  <div className="set-row set-head" aria-hidden="true">
-                    <span>Serie</span>
-                    <span>Peso (kg)</span>
-                    <span>Reps</span>
-                    <span />
-                  </div>
-                  {ex.sets.map((set, i) => (
-                    <div key={set.key}>
-                      <div className="set-row">
-                        <span className="num">{i + 1}</span>
-                        <input
-                          className="input"
-                          inputMode="decimal"
-                          autoComplete="off"
-                          placeholder="—"
-                          aria-label={`Peso serie ${i + 1} de ${ex.name} (kg, vacío si es peso corporal)`}
-                          aria-invalid={setErrors[set.key] ? true : undefined}
-                          value={set.weight}
-                          onChange={(e) => updateSet(ex.key, set.key, { weight: e.target.value })}
-                          enterKeyHint="next"
-                        />
-                        <input
-                          className="input"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          autoComplete="off"
-                          placeholder="—"
-                          aria-label={`Repeticiones serie ${i + 1} de ${ex.name}`}
-                          aria-invalid={setErrors[set.key] ? true : undefined}
-                          value={set.reps}
-                          onChange={(e) => updateSet(ex.key, set.key, { reps: e.target.value })}
-                          enterKeyHint="done"
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-icon"
-                          aria-label={`Quitar serie ${i + 1} de ${ex.name}`}
-                          onClick={() => updateExercise(ex.key, (e) => ({ ...e, sets: e.sets.filter((s) => s.key !== set.key) }))}
-                        >
-                          <IconTrash />
-                        </button>
+                  {ex.sets.length ? (
+                    <div className="set-table" role="group" aria-label={`Series de ${ex.name}`}>
+                      <div className="set-row set-head" aria-hidden="true">
+                        <span>Serie</span>
+                        <span>Peso (kg)</span>
+                        <span>Reps</span>
+                        <span />
                       </div>
-                      {setErrors[set.key] ? <p className="set-error">Serie {i + 1}: {setErrors[set.key]}</p> : null}
+                      {ex.sets.map((set, i) => (
+                        <div key={set.key}>
+                          <div className="set-row">
+                            <span className="num">{i + 1}</span>
+                            <input
+                              className="input"
+                              inputMode="decimal"
+                              autoComplete="off"
+                              placeholder="—"
+                              aria-label={`Peso serie ${i + 1} de ${ex.name} (kg, vacío si es peso corporal)`}
+                              aria-invalid={setErrors[set.key] ? true : undefined}
+                              value={set.weight}
+                              onChange={(e) => updateSet(ex.key, set.key, { weight: e.target.value })}
+                              enterKeyHint="next"
+                            />
+                            <input
+                              className="input"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              autoComplete="off"
+                              placeholder="—"
+                              aria-label={`Repeticiones serie ${i + 1} de ${ex.name}`}
+                              aria-invalid={setErrors[set.key] ? true : undefined}
+                              value={set.reps}
+                              onChange={(e) => updateSet(ex.key, set.key, { reps: e.target.value })}
+                              enterKeyHint="done"
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-icon"
+                              aria-label={`Quitar serie ${i + 1} de ${ex.name}`}
+                              onClick={() => updateExercise(ex.key, (e) => ({ ...e, sets: e.sets.filter((s) => s.key !== set.key) }))}
+                            >
+                              <IconTrash />
+                            </button>
+                          </div>
+                          {setErrors[set.key] ? <p className="set-error">Serie {i + 1}: {setErrors[set.key]}</p> : null}
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : null}
+
+                  {showQuick ? (
+                    <QuickAddSets
+                      key={`${ex.key}-${ex.sets.length}`}
+                      exerciseKey={ex.key}
+                      exerciseName={ex.name}
+                      defaults={lastSet ? { reps: lastSet.reps, weight: lastSet.weight } : undefined}
+                      onAdd={(sets) => addQuickSets(ex, sets)}
+                      onCancel={empty ? undefined : () => setQuickOpen((q) => ({ ...q, [ex.key]: false }))}
+                    />
+                  ) : null}
+
+                  <div className="set-actions">
+                    <button type="button" className="btn" onClick={() => addOneSet(ex)}>
+                      <IconPlus /> Agregar serie
+                    </button>
+                    {!showQuick ? (
+                      <button type="button" className="btn" onClick={() => openQuick(ex)}>
+                        Varias series
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
-
-              {showQuick ? (
-                <QuickAddSets
-                  key={`${ex.key}-${ex.sets.length}`}
-                  exerciseKey={ex.key}
-                  exerciseName={ex.name}
-                  defaults={lastSet ? { reps: lastSet.reps, weight: lastSet.weight } : undefined}
-                  onAdd={(sets) => addQuickSets(ex, sets)}
-                  onCancel={empty ? undefined : () => setQuickOpen((q) => ({ ...q, [ex.key]: false }))}
-                />
-              ) : null}
-
-              <div className="set-actions">
-                <button type="button" className="btn" onClick={() => addOneSet(ex)}>
-                  <IconPlus /> Agregar serie
-                </button>
-                {!showQuick ? (
-                  <button type="button" className="btn" onClick={() => openQuick(ex)}>
-                    Varias series
-                  </button>
-                ) : null}
-              </div>
             </section>
           );
         })}

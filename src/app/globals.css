@@ -146,6 +146,9 @@ p { margin: 0 0 0.75rem; }
   font: inherit; font-size: 16px; /* evita el zoom en iOS */
 }
 textarea.input { min-height: 88px; resize: vertical; }
+/* iPhone (Safari): el campo de fecha tiene un ancho mínimo propio y se salía de la pantalla. */
+input[type="date"].input { -webkit-appearance: none; appearance: none; display: block; max-width: 100%; text-align: left; }
+input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
 .input:focus-visible, .btn:focus-visible, a:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 1px;
 }
@@ -205,6 +208,20 @@ textarea.input { min-height: 88px; resize: vertical; }
 .exercise-card .ex-head > div:first-child { flex: 1; min-width: 0; }
 .exercise-card .ex-head h3 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
 .exercise-card .ex-head .btn-icon { width: 40px; min-height: 40px; }
+
+/* Encabezado tocable para colapsar/expandir el ejercicio */
+.ex-toggle {
+  flex: 1; min-width: 0; min-height: var(--tap); display: flex; align-items: center; gap: 8px;
+  padding: 4px 0; margin: -4px 0; background: none; border: 0; color: inherit; font: inherit;
+  text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.ex-toggle:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 2px; border-radius: 8px; }
+.ex-chevron { display: inline-flex; color: var(--muted); transition: transform 0.15s; flex: none; }
+.ex-chevron svg { width: 20px; height: 20px; }
+.ex-toggle[aria-expanded="false"] .ex-chevron { transform: rotate(-90deg); }
+.ex-title { display: grid; gap: 2px; min-width: 0; }
+.ex-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 0.88rem; font-weight: 600; }
+.exercise-card[data-collapsed] { padding-top: 12px; padding-bottom: 12px; }
 /* Sesión anterior: fecha y resumen compacto */
 .previous-line { margin: 8px 0 0; font-size: 0.9rem; }
 .previous {
