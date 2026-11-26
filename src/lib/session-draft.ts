@@ -250,3 +250,11 @@ export function clearNewPointer(id?: string) {
     localStorage.removeItem(NEW_POINTER);
   } catch {}
 }
+
+/** ¿Hay una sesión nueva empezada en este dispositivo que aún no se guardó en el servidor? */
+export function hasUnsavedNewDraft(ownerId: string): boolean {
+  const id = readNewPointer(ownerId);
+  if (!id) return false;
+  const stored = readStoredDraft(id, ownerId);
+  return Boolean(stored && !stored.savedOnce && stored.draft.exercises.length > 0);
+}

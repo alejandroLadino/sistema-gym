@@ -478,3 +478,29 @@ html:has(.session-head) { scroll-padding-top: 124px; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .notes[open] .notes-preview { display: none; }
+
+/* --- Inicio --------------------------------------------------------------- */
+.today-card { display: grid; gap: 10px; border-color: color-mix(in srgb, var(--primary) 40%, var(--border)); }
+.today-date { margin: 0; display: flex; align-items: center; gap: 8px; font-weight: 750; font-size: 1.05rem; }
+.today-date svg { width: 20px; height: 20px; color: var(--primary); flex: none; }
+.today-state { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 0.92rem; }
+
+/* Franja de lunes a domingo: el estado también va en texto (oculto) y con ✓, no solo color. */
+.week-strip { list-style: none; margin: 0; padding: 10px 6px; display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.week-day { display: grid; justify-items: center; gap: 4px; }
+.week-letter { font-size: 0.78rem; font-weight: 700; color: var(--muted); }
+.week-dot {
+  width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 0.9rem; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted);
+}
+.week-dot svg { width: 18px; height: 18px; }
+.week-day[data-trained] .week-dot { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
+.week-day[data-today] .week-dot { outline: 2px solid var(--primary); outline-offset: 2px; }
+.week-day[data-today] .week-letter, .week-label { color: var(--primary); }
+.week-label { font-size: 0.7rem; font-weight: 750; min-height: 1em; }
+
+/* Sesiones recientes: la tarjeta abre el detalle; «Repetir ejercicios» es una acción aparte. */
+.recent-card { display: grid; gap: 10px; padding: 0; overflow: hidden; }
+.recent-link { display: grid; gap: 2px; padding: 14px 16px 0; color: inherit; text-decoration: none; min-height: 44px; }
+.recent-actions { display: flex; justify-content: flex-end; padding: 0 12px 12px; }
+.recent-card > .alert { margin: 0 12px 12px; }

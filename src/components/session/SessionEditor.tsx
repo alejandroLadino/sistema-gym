@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { deleteSession, getPreviousSets, saveSession } from "@/app/actions/sessions";
+import { deleteSession, finishSession, getPreviousSets, saveSession } from "@/app/actions/sessions";
 import { IconCalendar, IconChevronDown, IconCopy, IconPlus, IconTrash } from "@/components/icons";
 import { formatDate, summarizeSets, todayLocal } from "@/lib/format";
 import {
@@ -40,6 +40,8 @@ type Props = {
   muscleGroups: MuscleGroup[];
   /** Sesión existente (edición). Sin ella se crea una nueva. */
   initial?: SessionData;
+  /** Aviso al abrir (p. ej., sesión creada con «Repetir ejercicios»). */
+  initialNotice?: string;
 };
 
 const AUTOSAVE_MS = 1200;
@@ -53,14 +55,17 @@ const STATUS_TEXT: Record<Status, string> = {
   error: "No se guardó",
 };
 
-export function SessionEditor({ userId, exercises, muscleGroups, initial }: Props) {
+export function SessionEditor({ userId, exercises, muscleGroups, initial, initialNotice }: Props) {
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [catalog, setCatalog] = useState<Exercise[]>(exercises);
   const [status, setStatus] = useState<Status>(initial ? "saved" : "empty");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showErrors, setShowErrors] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(initialNotice ?? null);
+  /** Finalizada (persistido en el servidor). Corregir una sesión finalizada no la reabre. */
+  const [finished, setFinished] = useState(Boolean(initial?.finished_at));
+  const [finishing, setFinishing] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [previous, setPrevious] = useState<Record<string, Record<string, PreviousSets | null>>>({});
   const [prevError, setPrevError] = useState(false);
@@ -116,9 +121,11 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
     if (pending) revision.current = 1;
     draftRef.current = loaded;
     setDraft(loaded);
+    // El aviso de «Repetir ejercicios» llega por la URL: se limpia para que no reaparezca al recargar.
+    if (initialNotice) window.history.replaceState(null, "", window.location.pathname);
     // Al entrar a una sesión, todas las tarjetas empiezan cerradas.
     setCollapsed(Object.fromEntries(loaded.exercises.map((e) => [e.key, true])));
-  }, [initial, userId]);
+  }, [initial, userId, initialNotice]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // --- Guardado -----------------------------------------------------------------
@@ -338,9 +345,28 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
       discard();
       return;
     }
+    if (finishing) return;
     if (revision.current !== savedRevision.current || status === "error") {
       const ok = await save(true);
       if (!ok) return;
+    }
+    if (!finished) {
+      setFinishing(true);
+      try {
+        const res = await finishSession(draft.id);
+        if (!res.ok) {
+          setErrorMsg(res.error);
+          setShowErrors(true);
+          return;
+        }
+        setFinished(true);
+      } catch {
+        setErrorMsg("Sin conexión con el servidor. Tu entrenamiento está guardado; pulsa «Finalizar sesión» de nuevo.");
+        setShowErrors(true);
+        return;
+      } finally {
+        setFinishing(false);
+      }
     }
     router.push("/historial");
     router.refresh();
@@ -381,8 +407,8 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
       <header className="session-head">
         <div className="session-head-row">
           <h1>Sesión de entrenamiento</h1>
-          <button type="button" className="btn btn-sm btn-primary" onClick={finish} disabled={status === "saving"}>
-            Finalizar sesión
+          <button type="button" className="btn btn-sm btn-primary" onClick={finish} disabled={status === "saving" || finishing}>
+            {finishing ? "Finalizando…" : finished ? "Listo" : "Finalizar sesión"}
           </button>
         </div>
         <div className="session-head-row">
@@ -404,6 +430,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
             />
           </label>
           <div className="session-head-status">
+            {finished ? <span className="badge badge-success">Finalizada</span> : null}
             <span className="save-status" data-state={status} role="status" aria-live="polite">
               <span className="dot" aria-hidden="true" />
               <span>{STATUS_TEXT[status]}</span>

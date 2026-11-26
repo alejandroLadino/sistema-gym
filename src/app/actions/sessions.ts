@@ -83,3 +83,55 @@ export async function deleteSession(formData: FormData) {
   revalidatePath("/");
   redirect("/historial?eliminada=1");
 }
+
+/** Marca la sesión como finalizada. Idempotente: repetirlo conserva la primera fecha. */
+export async function finishSession(id: string): Promise<ActionResult> {
+  if (!(await getActionUser())) return { ok: false, error: NO_ACCESS };
+  if (!isUuid(id)) return { ok: false, error: "Sesión inválida." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("finish_workout_session", { p_session_id: id });
+  if (error) {
+    if (error.code === "42501") return { ok: false, error: NO_ACCESS };
+    return { ok: false, error: "No se pudo finalizar la sesión. Revisa tu conexión y reintenta." };
+  }
+  return { ok: true };
+}
+
+/**
+ * «Repetir ejercicios»: crea una sesión con fecha `today` y los ejercicios de la
+ * sesión elegida, en el mismo orden y sin series (por capturar). La sesión original
+ * no se modifica. Los ejercicios archivados se omiten. Idempotente por `newId`.
+ */
+export async function repeatSession(
+  sourceId: string,
+  newId: string,
+  today: string,
+): Promise<ActionResult<{ id: string; omitted: string[] }>> {
+  if (!(await getActionUser())) return { ok: false, error: NO_ACCESS };
+  if (!isUuid(sourceId) || !isUuid(newId) || sourceId === newId || !isIsoDate(today)) {
+    return { ok: false, error: "No se pudo repetir la sesión." };
+  }
+  const supabase = await createClient();
+  const { data: source } = await supabase.rpc("get_workout_session", { p_session_id: sourceId });
+  const session = source as { exercises: { exercise_id: string; name: string; archived: boolean }[] } | null;
+  if (!session) return { ok: false, error: "La sesión no existe o no te pertenece." };
+
+  const kept = session.exercises.filter((e) => !e.archived);
+  const omitted = session.exercises.filter((e) => e.archived).map((e) => e.name);
+  if (kept.length === 0) {
+    return { ok: false, error: "Todos los ejercicios de esa sesión están archivados. Restaura alguno para repetirla." };
+  }
+  const { error } = await supabase.rpc("save_workout_session", {
+    p_session: {
+      id: newId,
+      session_date: today,
+      notes: null,
+      exercises: kept.map((e) => ({ exercise_id: e.exercise_id, sets: [] })),
+    },
+  });
+  if (error) {
+    if (error.code === "42501") return { ok: false, error: NO_ACCESS };
+    return { ok: false, error: "No se pudo crear la sesión. Revisa tu conexión y reintenta." };
+  }
+  return { ok: true, data: { id: newId, omitted } };
+}

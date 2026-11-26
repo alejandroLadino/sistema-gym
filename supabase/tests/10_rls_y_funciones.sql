@@ -250,6 +250,66 @@ select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
 set role authenticated;
 reset role;
 
+-- Estado de sesión e Inicio --------------------------------------------------------
+select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+do $$
+declare r jsonb; v_first timestamptz; n int;
+begin
+  -- Las sesiones nuevas empiezan en curso.
+  assert (select count(*) from public.workout_sessions where finished_at is null) = 2, 'Las sesiones nuevas están en curso';
+  r := public.finish_workout_session('50000000-0000-0000-0000-000000000002');
+  v_first := (r ->> 'finished_at')::timestamptz;
+  assert v_first is not null, 'Finalizar marca la fecha de cierre';
+  perform pg_sleep(0.01);
+  -- Idempotente: finalizar otra vez conserva la primera fecha.
+  assert (public.finish_workout_session('50000000-0000-0000-0000-000000000002') ->> 'finished_at')::timestamptz = v_first,
+    'Finalizar dos veces no cambia la fecha';
+  -- Guardar después de finalizar (corrección) conserva el estado.
+  perform public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000002", "session_date": "2026-11-26",
+    "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a",
+      "sets": [{"reps": 12, "weight_kg": 42.5}, {"reps": 10, "weight_kg": 47.25}, {"reps": 8, "weight_kg": 52.5}]}]}'::jsonb);
+  assert (select finished_at = v_first from public.workout_sessions where id = '50000000-0000-0000-0000-000000000002'),
+    'Corregir una sesión finalizada no la reabre';
+  assert (public.get_workout_session('50000000-0000-0000-0000-000000000002') ->> 'finished_at') is not null, 'El detalle incluye el estado';
+  assert (select finished_at is not null from public.list_workout_sessions(null, null, 100) where id = '50000000-0000-0000-0000-000000000002'),
+    'El historial incluye el estado';
+
+  -- Inicio: ventana desde el 20/11 (solo la del 26/11) + las que siguen en curso (la del 18/11).
+  select count(*) into n from public.get_home_sessions('2026-11-20', 3);
+  assert n = 2, format('Inicio debe traer la de la semana y la en curso: %s', n);
+  -- Ventana vacía: las 0 finalizadas recientes no agregan nada, la en curso sí.
+  assert (select count(*) from public.get_home_sessions('2030-01-01', 0)) = 1, 'Solo la sesión en curso';
+  assert (select muscle_groups from public.get_home_sessions('2026-11-20', 3) where id = '50000000-0000-0000-0000-000000000002')
+         = '["Pecho"]'::jsonb, 'Grupos musculares de la sesión';
+  assert (select exercise_count = 1 and set_count = 3 from public.get_home_sessions('2026-11-20', 3)
+          where id = '50000000-0000-0000-0000-000000000002'), 'Conteos de ejercicios y series';
+  -- Grupos en el orden de la sesión y sin repetir.
+  assert (select muscle_groups from public.get_home_sessions('2026-11-01', 3) where id = '50000000-0000-0000-0000-000000000001')
+         = '["Pecho", "Espalda"]'::jsonb, 'Grupos en orden de la sesión';
+end $$;
+reset role;
+
+select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
+set role authenticated;
+do $$
+declare ok boolean := false;
+begin
+  begin
+    perform public.finish_workout_session('50000000-0000-0000-0000-000000000001');
+  exception when insufficient_privilege then ok := true;
+  end;
+  assert ok, 'No se puede finalizar una sesión ajena';
+  assert not exists (select 1 from public.get_home_sessions('2000-01-01', 3)), 'Inicio es privado';
+end $$;
+reset role;
+do $$
+begin
+  assert (select finished_at is null from public.workout_sessions where id = '50000000-0000-0000-0000-000000000001'),
+    'El intento ajeno no tuvo efecto';
+end $$;
+\echo '   Estado de sesión e Inicio: OK'
+
 -- 3. Beto no ve ni toca nada de Ana --------------------------------------------
 select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
 set role authenticated;

@@ -8,6 +8,8 @@ export type SessionRow = {
   exercise_count: number;
   set_count: number;
   exercises: { name: string; sets: number }[];
+  /** null = en curso. */
+  finished_at?: string | null;
 };
 
 export function SessionListItem({ session }: { session: SessionRow }) {
@@ -15,7 +17,10 @@ export function SessionListItem({ session }: { session: SessionRow }) {
     <Link href={`/sesiones/${session.id}`} className="link-card">
       <div className="card stack" style={{ gap: 6 }}>
         <div className="row between">
-          <strong>{formatDate(session.session_date)}</strong>
+          <strong>
+            {formatDate(session.session_date)}{" "}
+            {session.finished_at === null ? <span className="badge badge-warning">En curso</span> : null}
+          </strong>
           <span className="badge">
             {session.exercise_count} {session.exercise_count === 1 ? "ejercicio" : "ejercicios"} · {session.set_count}{" "}
             {session.set_count === 1 ? "serie" : "series"}
