@@ -1,4 +1,5 @@
-import { isIsoDate, summarizeSets } from "./format";
+import { isIsoDate } from "./format";
+import { bestSet, formatBestSet } from "./progress";
 import type { SessionData, SetValue } from "./types";
 import { parseReps, parseWeight, type Parsed } from "./validation";
 
@@ -152,10 +153,11 @@ export function hasNoSets(sets: DraftSet[]): boolean {
 }
 
 /**
- * Resumen de un ejercicio colapsado: «4 series · 3 × 12 a 10 kg · 15 kg × 12».
- * `incomplete` indica series con datos a medias (no se pueden guardar).
+ * Resumen de la tarjeta cerrada: cantidad de series registradas y mejor serie.
+ * Con peso: mayor peso y las reps de esa serie (empate → más reps). Peso corporal:
+ * la serie con más reps. Las filas vacías o a medias no cuentan (`incomplete`).
  */
-export function exerciseSummary(sets: DraftSet[]): { count: number; text: string; incomplete: boolean } {
+export function exerciseSummary(sets: DraftSet[]): { count: number; text: string; best: string | null; incomplete: boolean } {
   const valid: SetValue[] = [];
   let incomplete = false;
   for (const set of sets) {
@@ -165,10 +167,11 @@ export function exerciseSummary(sets: DraftSet[]): { count: number; text: string
     if (reps.ok && weight.ok) valid.push({ reps: reps.value, weight_kg: weight.value });
     else incomplete = true;
   }
-  const count = sets.filter((s) => !isSetBlank(s)).length;
-  if (count === 0) return { count, text: "Sin series", incomplete };
-  const label = `${count} ${count === 1 ? "serie" : "series"}`;
-  return { count, text: valid.length ? `${label} · ${summarizeSets(valid)}` : label, incomplete };
+  if (valid.length === 0) return { count: 0, text: "Sin series registradas", best: null, incomplete };
+  const top = bestSet(valid);
+  const best = formatBestSet(top, top.weight_kg !== null);
+  const count = `${valid.length} ${valid.length === 1 ? "serie" : "series"}`;
+  return { count: valid.length, text: `${count} · Mejor serie: ${best}`, best, incomplete };
 }
 
 /** Copia las series de la sesión anterior: reemplaza filas vacías, si no, añade. */

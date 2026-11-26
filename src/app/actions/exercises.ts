@@ -80,7 +80,8 @@ export async function quickCreateExercise(input: { name: string; muscle_group_id
     const mapped = dbError(error?.code, "No se pudo crear el ejercicio. Revisa tu conexión y reintenta.");
     return { ok: false, ...mapped, duplicate: error?.code === "23505" };
   }
-  revalidatePath("/ejercicios");
+  // Sin revalidatePath: se llama desde el editor de sesión y refrescar la ruta lo
+  // remontaría mientras se entrena. «Ejercicios» es dinámica y se carga fresca.
   return { ok: true, data };
 }
 

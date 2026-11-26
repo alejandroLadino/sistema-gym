@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deleteSession, getPreviousSets, saveSession } from "@/app/actions/sessions";
-import { IconCopy, IconPlus, IconTrash } from "@/components/icons";
+import { IconCalendar, IconChevronDown, IconCopy, IconPlus, IconTrash } from "@/components/icons";
 import { formatDate, summarizeSets, todayLocal } from "@/lib/format";
 import {
   appendSets,
@@ -29,6 +29,7 @@ import {
 import type { Exercise, MuscleGroup, PreviousSets, SessionData } from "@/lib/types";
 import { uuidv4 } from "@/lib/uuid";
 import { ExercisePicker } from "./ExercisePicker";
+import { CardMenu } from "./CardMenu";
 import { QuickAddSets, quickRepsInputId } from "./QuickAddSets";
 
 type Status = "empty" | "dirty" | "invalid" | "saving" | "saved" | "error";
@@ -44,7 +45,7 @@ type Props = {
 const AUTOSAVE_MS = 1200;
 
 const STATUS_TEXT: Record<Status, string> = {
-  empty: "Agrega un ejercicio para empezar",
+  empty: "Sin ejercicios",
   dirty: "Sin guardar",
   invalid: "Faltan datos",
   saving: "Guardando…",
@@ -77,6 +78,8 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
   const blocked = useRef(false); // tras eliminar/descartar
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialized = useRef(false);
+  /** Tarjeta recién agregada que hay que llevar a la vista. */
+  const scrollTarget = useRef<string | null>(null);
 
   // --- Carga inicial: servidor + borrador local --------------------------------
   /* eslint-disable react-hooks/set-state-in-effect -- inicialización en el cliente: fecha local y localStorage */
@@ -256,17 +259,28 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
     setPickerOpen(false);
     // Doble toque o reintento: un ejercicio ya presente no se agrega otra vez.
     if (draftRef.current?.exercises.some((e) => e.exerciseId === exercise.id)) return;
-    // El nuevo ejercicio queda abierto; los demás se colapsan.
+    // El nuevo ejercicio queda abierto (y a la vista); los demás se colapsan.
     const existing = draftRef.current?.exercises ?? [];
     setCollapsed(Object.fromEntries(existing.map((e) => [e.key, true])));
+    const key = newKey();
+    scrollTarget.current = key;
     update((d) => ({
       ...d,
-      exercises: [
-        ...d.exercises,
-        { key: newKey(), exerciseId: exercise.id, name: exercise.name, sets: [] },
-      ],
+      exercises: [...d.exercises, { key, exerciseId: exercise.id, name: exercise.name, sets: [] }],
     }));
   };
+
+  // Lleva a la vista la tarjeta recién agregada si quedó fuera de pantalla (sin abrir el teclado).
+  useEffect(() => {
+    const key = scrollTarget.current;
+    if (!key || !draft) return;
+    scrollTarget.current = null;
+    const el = document.getElementById(`tarjeta-${key}`);
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const head = document.querySelector(".session-head")?.getBoundingClientRect().bottom ?? 0;
+    if (rect.top < head || rect.bottom > window.innerHeight) el.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [draft]);
 
   const toggleCollapsed = (key: string) => setCollapsed((c) => ({ ...c, [key]: !c[key] }));
 
@@ -276,8 +290,17 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
   const updateSet = (exKey: string, setKey: string, patch: Partial<DraftSet>) =>
     updateExercise(exKey, (e) => ({ ...e, sets: e.sets.map((s) => (s.key === setKey ? { ...s, ...patch } : s)) }));
 
+  /** Quita el ejercicio solo de esta sesión (sigue en el catálogo y en otras sesiones). */
   const removeExercise = (ex: DraftExercise) => {
-    if (ex.sets.some((s) => !isSetBlank(s)) && !window.confirm(`¿Quitar ${ex.name} de esta sesión?`)) return;
+    const n = exerciseSummary(ex.sets).count;
+    if (
+      n > 0 &&
+      !window.confirm(
+        `¿Quitar «${ex.name}» de esta sesión? Se descartarán sus ${n} ${n === 1 ? "serie registrada" : "series registradas"}. ` +
+          "El ejercicio seguirá en tu catálogo y en tus otras sesiones.",
+      )
+    )
+      return;
     update((d) => ({ ...d, exercises: d.exercises.filter((e) => e.key !== ex.key) }));
   };
 
@@ -355,29 +378,50 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
 
   return (
     <div>
-      <div className="save-bar">
-        <span className="save-status" data-state={status} role="status" aria-live="polite">
-          <span className="dot" aria-hidden="true" />
-          {STATUS_TEXT[status]}
-        </span>
-        <div className="row" style={{ flexWrap: "nowrap" }}>
-          {status === "error" ? (
-            <button type="button" className="btn btn-sm btn-primary" onClick={() => void save(true)}>
-              Reintentar
-            </button>
-          ) : status === "dirty" || status === "invalid" ? (
-            <button type="button" className="btn btn-sm" onClick={() => void save(true)}>
-              Guardar
-            </button>
-          ) : null}
+      <header className="session-head">
+        <div className="session-head-row">
+          <h1>Sesión de entrenamiento</h1>
           <button type="button" className="btn btn-sm btn-primary" onClick={finish} disabled={status === "saving"}>
-            Terminar
+            Finalizar sesión
           </button>
         </div>
-      </div>
+        <div className="session-head-row">
+          <label className="date-control">
+            <IconCalendar />
+            <span className="date-control-text">{formatDate(draft.date)}</span>
+            <input
+              className="date-control-input"
+              type="date"
+              aria-label="Fecha del entrenamiento"
+              value={draft.date}
+              required
+              onClick={(e) => {
+                try {
+                  e.currentTarget.showPicker?.();
+                } catch {}
+              }}
+              onChange={(e) => e.target.value && update((d) => ({ ...d, date: e.target.value }))}
+            />
+          </label>
+          <div className="session-head-status">
+            <span className="save-status" data-state={status} role="status" aria-live="polite">
+              <span className="dot" aria-hidden="true" />
+              <span>{STATUS_TEXT[status]}</span>
+            </span>
+            {status === "error" ? (
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => void save(true)}>
+                Reintentar
+              </button>
+            ) : status === "dirty" || status === "invalid" ? (
+              <button type="button" className="btn btn-sm" onClick={() => void save(true)}>
+                Guardar
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </header>
 
       <div className="stack">
-        <h1>{isNew ? "Registrar entrenamiento" : "Sesión de entrenamiento"}</h1>
         {notice ? <p className="alert alert-info" role="status">{notice}</p> : null}
         {status === "error" && errorMsg ? (
           <p className="alert alert-error" role="alert">
@@ -386,17 +430,9 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
         ) : errorMsg && showErrors ? (
           <p className="alert alert-error" role="alert">{errorMsg}</p>
         ) : null}
-
-        <label className="field">
-          <span>Fecha del entrenamiento</span>
-          <input
-            className="input"
-            type="date"
-            value={draft.date}
-            required
-            onChange={(e) => e.target.value && update((d) => ({ ...d, date: e.target.value }))}
-          />
-        </label>
+        {draft.exercises.length === 0 ? (
+          <p className="muted" style={{ margin: 0 }}>Agrega tu primer ejercicio para empezar a registrar series.</p>
+        ) : null}
 
         {draft.exercises.map((ex) => {
           const prev = prevForDate?.[ex.exerciseId];
@@ -409,7 +445,13 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
           const isCollapsed = Boolean(collapsed[ex.key]) && !hasErrors;
           const bodyId = `ejercicio-${ex.key}`;
           return (
-            <section key={ex.key} className="card exercise-card" aria-label={ex.name} data-collapsed={isCollapsed || undefined}>
+            <section
+              key={ex.key}
+              id={`tarjeta-${ex.key}`}
+              className="card exercise-card"
+              aria-label={ex.name}
+              data-collapsed={isCollapsed || undefined}
+            >
               <div className="ex-head">
                 <button
                   type="button"
@@ -417,17 +459,20 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
                   aria-expanded={!isCollapsed}
                   aria-controls={bodyId}
                   aria-label={`${isCollapsed ? "Expandir" : "Colapsar"} ${ex.name}`}
+                  aria-describedby={`${bodyId}-resumen`}
                   onClick={() => toggleCollapsed(ex.key)}
                 >
+                  <span className="ex-chevron" aria-hidden="true"><IconChevronDown /></span>
                   <span className="ex-title">
                     <h3>{ex.name}</h3>
-                    {isCollapsed && summary.incomplete ? <span className="badge badge-warning">Faltan datos</span> : null}
+                    <span id={`${bodyId}-resumen`} className="ex-summary" hidden={!isCollapsed}>
+                      {summary.text}
+                      {summary.incomplete ? <span className="badge badge-warning">Faltan datos</span> : null}
+                    </span>
                     {ex.archived ? <span className="badge">Archivado</span> : null}
                   </span>
                 </button>
-                <button type="button" className="btn btn-ghost btn-icon" aria-label={`Quitar ${ex.name}`} onClick={() => removeExercise(ex)}>
-                  <IconTrash />
-                </button>
+                <CardMenu exerciseName={ex.name} onRemove={() => removeExercise(ex)} />
               </div>
 
               {!isCollapsed ? (
@@ -521,8 +566,11 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
           <IconPlus /> Agregar ejercicio
         </button>
 
-        <details className="disclosure">
-          <summary>Notas de la sesión</summary>
+        <details className="disclosure notes">
+          <summary>
+            Notas de la sesión
+            {draft.notes.trim() ? <span className="notes-preview">{draft.notes.trim()}</span> : null}
+          </summary>
           <label className="field">
             <span className="sr-only">Notas</span>
             <textarea
