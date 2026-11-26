@@ -43,8 +43,9 @@ export async function saveSession(payload: SessionPayload): Promise<ActionResult
     if (error?.code === "23503") return { ok: false, error: "Uno de los ejercicios ya no existe en tu catálogo." };
     return { ok: false, error: "No se pudo guardar. Revisa tu conexión y reintenta." };
   }
-  revalidatePath("/historial");
-  revalidatePath("/");
+  // Sin revalidatePath: invalidar la caché hace que Next vuelva a renderizar la ruta
+  // actual y, tras el primer guardado (la URL ya es /sesiones/[id]), remonte el editor
+  // mientras se escribe. Las páginas son dinámicas y se piden frescas al navegar.
   return { ok: true, data: data as { id: string; updated_at: string } };
 }
 

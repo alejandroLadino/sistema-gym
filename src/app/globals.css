@@ -182,16 +182,6 @@ input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
 .auth-card .brand-big { font-size: 1.6rem; font-weight: 800; text-align: center; margin-bottom: 4px; }
 
 /* --- Editor de sesión ------------------------------------------------- */
-/* Barra opaca: al desplazarse, el título y la fecha no se ven a través de ella. */
-.save-bar {
-  position: sticky; top: 0; z-index: 15; margin: -16px -16px 16px; padding: 10px 16px;
-  min-height: 60px; background: var(--bg);
-  border-bottom: 1px solid var(--border); box-shadow: 0 6px 12px -10px rgb(0 0 0 / 0.35);
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-}
-.save-bar .save-status { min-width: 0; }
-.save-bar .save-status > :last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (min-width: 900px) { .save-bar { top: 49px; } }
 .save-status { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; font-size: 0.92rem; }
 /* Ningún campo enfocado queda escondido detrás de la barra fija. */
 .exercise-card .input, .field .input { scroll-margin-top: 76px; }
@@ -424,3 +414,67 @@ details.disclosure[open] > summary::before { transform: rotate(90deg); }
 .history-item { display: grid; gap: 6px; padding: 12px 14px; }
 .history-item a { min-height: 32px; display: inline-flex; align-items: center; }
 .history-sets { margin: 0; padding-left: 22px; display: grid; gap: 2px; font-weight: 600; }
+
+/* --- Editor de sesión ---------------------------------------------------- */
+/* Encabezado fijo y compacto: título, «Finalizar sesión», fecha y estado de guardado. */
+.session-head {
+  position: sticky; top: 0; z-index: 15; margin: -16px -16px 14px; padding: 8px 16px 10px;
+  display: grid; gap: 6px; background: var(--bg);
+  border-bottom: 1px solid var(--border); box-shadow: 0 6px 12px -10px rgb(0 0 0 / 0.35);
+}
+@media (min-width: 900px) { .session-head { top: 49px; } }
+.session-head-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.session-head h1 { margin: 0; font-size: clamp(1.05rem, 4.4vw, 1.25rem); line-height: 1.2; min-width: 0; }
+.session-head-row:first-child .btn { padding: 0 12px; }
+.session-head .btn { white-space: nowrap; flex: none; }
+.session-head-status { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.session-head-status .save-status { min-width: 0; }
+.session-head-status .save-status > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* El contenido no queda escondido detrás del encabezado al desplazar o enfocar. */
+html:has(.session-head) { scroll-padding-top: 124px; }
+@media (min-width: 900px) { html:has(.session-head) { scroll-padding-top: 176px; } }
+.exercise-card { scroll-margin-top: 124px; }
+@media (min-width: 900px) { .exercise-card { scroll-margin-top: 176px; } }
+
+/* Fecha: control con icono de calendario; el selector nativo queda encima, invisible. */
+.date-control {
+  position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text);
+  font-weight: 650; font-size: 0.95rem; cursor: pointer; flex: none;
+}
+.date-control svg { width: 18px; height: 18px; color: var(--primary); }
+.date-control:focus-within { outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 1px; }
+.date-control-input {
+  position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: 0; padding: 0; margin: 0;
+  cursor: pointer; font-size: 16px; -webkit-appearance: none; appearance: none;
+}
+
+/* Tarjeta: flecha visible y resumen cuando está cerrada */
+.ex-chevron { display: inline-flex; color: var(--muted); flex: none; transition: transform 0.15s; }
+.ex-chevron svg { width: 20px; height: 20px; }
+.ex-toggle[aria-expanded="false"] .ex-chevron { transform: rotate(-90deg); }
+.exercise-card .ex-title { display: grid; gap: 2px; justify-items: start; }
+.ex-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--muted); font-size: 0.88rem; font-weight: 600; }
+.ex-summary[hidden] { display: none; }
+
+/* Menú de acciones de la tarjeta */
+.card-menu { position: relative; flex: none; }
+.card-menu-list {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 220px; padding: 6px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.25);
+}
+.card-menu-item {
+  width: 100%; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 12px;
+  border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; font-weight: 650; text-align: left; cursor: pointer;
+}
+.card-menu-item svg { width: 18px; height: 18px; }
+.card-menu-item:hover, .card-menu-item:focus-visible { background: var(--surface-2); outline: none; }
+.card-menu-item.danger { color: var(--danger); }
+
+/* Notas: plegables con vista previa del contenido */
+.notes > summary { flex-wrap: wrap; gap: 0 8px; }
+.notes-preview {
+  flex-basis: 100%; margin-left: 20px; color: var(--muted); font-weight: 500; font-size: 0.88rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.notes[open] .notes-preview { display: none; }

@@ -90,26 +90,37 @@ describe("resumen de la sesión anterior", () => {
   });
 });
 
-describe("resumen del ejercicio colapsado", () => {
-  it("cuenta las series y resume sus valores", async () => {
+describe("resumen de la tarjeta cerrada", () => {
+  it("cantidad de series y mejor serie: mayor peso con sus reps; empate → más reps", async () => {
     const { exerciseSummary } = await import("./session-draft");
     expect(
       exerciseSummary([
-        { key: "1", weight: "10", reps: "12" },
-        { key: "2", weight: "10", reps: "12" },
-        { key: "3", weight: "10", reps: "12" },
-        { key: "4", weight: "15", reps: "12" },
+        { key: "1", weight: "40", reps: "10" },
+        { key: "2", weight: "40", reps: "10" },
+        { key: "3", weight: "40", reps: "8" },
       ]),
-    ).toEqual({ count: 4, text: "4 series · 3 × 12 a 10 kg · 15 kg × 12", incomplete: false });
+    ).toMatchObject({ count: 3, text: "3 series · Mejor serie: 40 kg × 10", incomplete: false });
+    expect(
+      exerciseSummary([
+        { key: "1", weight: "10", reps: "12" },
+        { key: "2", weight: "15", reps: "6" },
+        { key: "3", weight: "15", reps: "8" },
+      ]).best,
+    ).toBe("15 kg × 8");
   });
-  it("peso corporal, vacío e incompleto", async () => {
+  it("peso corporal en reps; vacío; filas vacías e incompletas excluidas", async () => {
     const { exerciseSummary } = await import("./session-draft");
-    expect(exerciseSummary([{ key: "1", weight: "", reps: "10" }])).toEqual({ count: 1, text: "1 serie · 10 reps", incomplete: false });
-    expect(exerciseSummary([])).toEqual({ count: 0, text: "Sin series", incomplete: false });
-    expect(exerciseSummary([{ key: "1", weight: "40", reps: "" }, { key: "2", weight: "40", reps: "8" }])).toEqual({
-      count: 2,
-      text: "2 series · 40 kg × 8",
-      incomplete: true,
-    });
+    expect(exerciseSummary([{ key: "1", weight: "", reps: "10" }, { key: "2", weight: "", reps: "12" }]).text).toBe(
+      "2 series · Mejor serie: 12 reps",
+    );
+    expect(exerciseSummary([])).toEqual({ count: 0, text: "Sin series registradas", best: null, incomplete: false });
+    expect(exerciseSummary([{ key: "1", weight: "", reps: "" }]).text).toBe("Sin series registradas");
+    expect(
+      exerciseSummary([
+        { key: "1", weight: "40", reps: "" },
+        { key: "2", weight: "", reps: "" },
+        { key: "3", weight: "42,5", reps: "6" },
+      ]),
+    ).toEqual({ count: 1, text: "1 serie · Mejor serie: 42,5 kg × 6", best: "42,5 kg × 6", incomplete: true });
   });
 });

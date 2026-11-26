@@ -205,7 +205,7 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
 
   // Al agregar otro ejercicio, el anterior se colapsa: solo queda su nombre.
   await expect(page.getByRole("button", { name: "Expandir Press de banca" })).toHaveAttribute("aria-expanded", "false");
-  await expect(page.getByRole("button", { name: "Expandir Press de banca" })).toHaveText("Press de banca");
+  await expect(press.locator(".ex-summary")).toHaveText("4 series · Mejor serie: 42,5 kg × 6");
   await expect(press.getByRole("button", { name: /^(Subir|Bajar) / })).toHaveCount(0);
   await expect(press.getByLabel(/^Peso serie \d+ de Press de banca/)).toHaveCount(0);
   await shot(page, "05b-ejercicio-colapsado");
@@ -252,7 +252,7 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
   await expect(page.getByLabel("Peso serie 1 de Dominadas", { exact: false })).toHaveValue("");
   await expect(page.getByLabel("Peso serie 2 de Dominadas", { exact: false })).toHaveValue("");
 
-  await page.getByRole("button", { name: "Terminar" }).click();
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
   await expect(page).toHaveURL(/\/historial$/);
   await expect(page.getByRole("link", { name: /Press de banca/ })).toHaveCount(1);
   await page.context().close();
@@ -699,6 +699,125 @@ test("cuenta A: Progreso: lista, detalle, métricas, rangos y correcciones", asy
   await expect(page.getByText("Archivado", { exact: true })).toBeVisible();
   await expect(historial.locator(".history-item")).toHaveCount(3);
   await page.context().close();
+});
+
+/**
+ * Editor de sesión: agregar un ejercicio, encontrar su tarjeta abierta, registrar tres
+ * series, cerrarla y leer el resumen; guardado al recargar; peso corporal; quitar un
+ * ejercicio con series; encabezado fijo; últimos controles accesibles.
+ */
+async function editorFlow(page: Page, suffix: string, mobile: boolean) {
+  const sentadilla = `Sentadilla goblet ${suffix}`;
+  const fondos = `Fondos ${suffix}`;
+  await page.goto("/entrenar");
+  const head = page.locator(".session-head");
+  await expect(head.getByRole("heading", { name: "Sesión de entrenamiento" })).toBeVisible();
+  await expect(head.getByRole("button", { name: "Finalizar sesión" })).toBeVisible();
+  await expect(head.getByLabel("Fecha del entrenamiento")).toHaveValue(isoDaysAgo(0));
+  await head.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(1));
+  await expect(head.locator(".date-control-text")).toContainText(String(Number(isoDaysAgo(1).slice(8))));
+
+  // Agregar: la tarjeta queda abierta y a la vista, sin abrir el teclado.
+  await addExercise(page, sentadilla, { create: true, muscle: "Cuádriceps" });
+  const card = page.getByRole("region", { name: sentadilla });
+  await expect(page.getByRole("button", { name: `Colapsar ${sentadilla}` })).toHaveAttribute("aria-expanded", "true");
+  await expect(card).toBeInViewport();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("INPUT");
+
+  // Tres series: 20 kg × 10, 10 y 8.
+  await card.getByLabel(`Repeticiones por serie de ${sentadilla}`).fill("10");
+  await card.getByLabel(`Peso por serie de ${sentadilla}`, { exact: false }).fill("20");
+  await card.getByRole("button", { name: "Agregar 3 series" }).click();
+  await page.getByLabel(`Repeticiones serie 3 de ${sentadilla}`).fill("8");
+  await saved(page);
+
+  // Cerrar y leer el resumen.
+  await page.getByRole("button", { name: `Colapsar ${sentadilla}` }).click();
+  await expect(page.getByRole("button", { name: `Expandir ${sentadilla}` })).toHaveAttribute("aria-expanded", "false");
+  await expect(card.locator(".ex-summary")).toHaveText("3 series · Mejor serie: 20 kg × 10");
+  await expect(card.getByLabel(/^Peso serie/)).toHaveCount(0);
+
+  // Peso corporal: al agregarlo, el anterior queda cerrado y el nuevo abierto.
+  await addExercise(page, fondos, { create: true, muscle: "Tríceps" });
+  const cardFondos = page.getByRole("region", { name: fondos });
+  await expect(cardFondos).toBeInViewport();
+  await cardFondos.getByLabel("Cantidad de series de " + fondos).fill("2");
+  await cardFondos.getByLabel(`Repeticiones por serie de ${fondos}`).fill("12");
+  await cardFondos.getByRole("button", { name: "Agregar 2 series" }).click();
+  await page.getByRole("button", { name: `Colapsar ${fondos}` }).click();
+  await expect(cardFondos.locator(".ex-summary")).toHaveText("2 series · Mejor serie: 12 reps");
+
+  // Notas con vista previa.
+  await page.getByText("Notas de la sesión").click();
+  await page.getByPlaceholder("Cómo te sentiste, molestias, etc.").fill("Buena energía hoy");
+  await page.getByText("Notas de la sesión").click();
+  await expect(page.locator(".notes-preview")).toHaveText("Buena energía hoy");
+  await saved(page);
+  // Guardar no vuelve a montar el editor: no aparece el aviso de recuperación ni se reabren tarjetas.
+  await expect(page.getByText("Recuperamos cambios")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: `Expandir ${sentadilla}` })).toBeVisible();
+  await shot(page, `13-editor-${suffix}`);
+
+  // Recargar: todo se conserva (con varios ejercicios, solo el último queda abierto).
+  await page.reload();
+  await expect(card.locator(".ex-summary")).toHaveText("3 series · Mejor serie: 20 kg × 10");
+  await expand(page, sentadilla);
+  await expect(page.getByLabel(`Repeticiones serie 3 de ${sentadilla}`)).toHaveValue("8");
+
+  // El encabezado fijo sigue visible al desplazar.
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await expect(head.getByRole("button", { name: "Finalizar sesión" })).toBeInViewport();
+
+  // Quitar de la sesión un ejercicio con series: menú de la tarjeta y confirmación.
+  let mensaje = "";
+  page.once("dialog", async (d) => {
+    mensaje = d.message();
+    await d.accept();
+  });
+  await page.getByRole("button", { name: `Acciones de ${fondos}` }).click();
+  await page.getByRole("menuitem", { name: "Quitar de la sesión" }).click();
+  expect(mensaje).toContain("Se descartarán sus 2 series registradas");
+  await expect(cardFondos).toHaveCount(0);
+  await saved(page);
+  await page.reload();
+  await expect(page.getByRole("region", { name: fondos })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: sentadilla })).toHaveCount(1);
+  // El ejercicio sigue en el catálogo.
+  await page.getByRole("button", { name: "Agregar ejercicio", exact: true }).click();
+  await page.getByRole("dialog").getByLabel("Buscar ejercicio").fill(fondos);
+  await expect(page.getByRole("dialog").getByRole("listitem")).toHaveCount(1);
+  await page.getByRole("dialog").getByRole("button", { name: "Cerrar" }).click();
+
+  // Los últimos controles quedan por encima de la barra inferior en móvil.
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(300);
+  const ultimo = (await page.getByRole("button", { name: "Eliminar sesión" }).boundingBox())!;
+  if (mobile) {
+    const nav = (await page.getByRole("navigation", { name: "Navegación principal" }).boundingBox())!;
+    expect(ultimo.y + ultimo.height).toBeLessThanOrEqual(nav.y);
+  } else {
+    expect(ultimo.y + ultimo.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  }
+  await shot(page, `13-editor-${suffix}-final`);
+
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial$/);
+}
+
+test("cuenta A: editor de sesión en escritorio", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
+  await login(page, userA.email, userA.final);
+  await editorFlow(page, "escritorio", false);
+  await context.close();
+});
+
+test("cuenta A: editor de sesión a 375 px", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  await login(page, userA.email, userA.final);
+  await editorFlow(page, "movil", true);
+  await context.close();
 });
 
 test("cuenta B no accede a los datos de A, ni por URL directa", async ({ browser }) => {
