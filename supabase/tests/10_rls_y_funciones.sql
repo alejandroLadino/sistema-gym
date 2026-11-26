@@ -290,6 +290,52 @@ begin
 end $$;
 reset role;
 
+-- Historial: búsqueda por ejercicio, rango y páginas ---------------------------------
+-- Ana: 001 (18/11: Press de banca, Dominadas [archivado]), 002 (26/11: Press de banca)
+-- y una segunda sesión el 26/11 (003) para comprobar el mismo día y el cursor.
+select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+select from public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000003", "session_date": "2026-11-26",
+  "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a", "sets": [{"reps": 5, "weight_kg": 60}]}]}'::jsonb);
+do $$
+declare ids uuid[]; r record;
+begin
+  -- Todo: más reciente primero; las dos del mismo día se conservan.
+  select array_agg(s.id order by ord) into ids
+  from (select h.id, row_number() over () as ord from public.search_workout_sessions() h) s;
+  assert ids = array['50000000-0000-0000-0000-000000000003', '50000000-0000-0000-0000-000000000002',
+                     '50000000-0000-0000-0000-000000000001']::uuid[], format('Orden del historial: %s', ids);
+  assert (select total_count from public.search_workout_sessions() limit 1) = 3, 'Total de sesiones';
+
+  -- Búsqueda sin mayúsculas ni tildes; varias coincidencias en una sesión → una sola fila.
+  assert (select count(*) from public.search_workout_sessions(p_query => 'DOMÍN')) = 1, 'Busca sin tildes ni mayúsculas';
+  assert (select count(*) from public.search_workout_sessions(p_query => 'a')) = 3, 'Cada sesión una sola vez';
+  assert (select count(*) from public.search_workout_sessions(p_query => '%')) = 0, 'Los comodines se buscan literalmente';
+  assert (select count(*) from public.search_workout_sessions(p_query => '   ')) = 3, 'Búsqueda vacía = sin filtro';
+
+  -- Búsqueda combinada con rango, y límites sueltos.
+  assert (select count(*) from public.search_workout_sessions('2026-11-20', null, 'press')) = 2, 'Búsqueda + desde';
+  assert (select count(*) from public.search_workout_sessions(null, '2026-11-20', 'press')) = 1, 'Búsqueda + hasta';
+  assert (select count(*) from public.search_workout_sessions('2026-11-20', '2026-11-25')) = 0, 'Rango sin resultados';
+
+  -- Resumen de la tarjeta: grupos, conteos y hasta dos nombres.
+  select * into r from public.search_workout_sessions(p_query => 'domin');
+  assert r.muscle_groups = '["Pecho", "Espalda"]'::jsonb and r.exercise_names = '["Press de banca", "Dominadas"]'::jsonb
+         and r.exercise_count = 2 and r.set_count = 4, format('Resumen de la sesión: %s', row_to_json(r));
+
+  -- Páginas: el cursor continúa sin repetir ni saltar (también dentro del mismo día).
+  select * into r from public.search_workout_sessions(p_limit => 1);
+  assert r.id = '50000000-0000-0000-0000-000000000003' and r.total_count = 3, 'Primera página';
+  select * into r from public.search_workout_sessions(p_before_date => r.session_date, p_before_created => r.created_at,
+                                                      p_before_id => r.id, p_limit => 1);
+  assert r.id = '50000000-0000-0000-0000-000000000002' and r.total_count is null, 'Segunda página';
+  select * into r from public.search_workout_sessions(p_query => 'press', p_before_date => r.session_date,
+                                                      p_before_created => r.created_at, p_before_id => r.id);
+  assert r.id = '50000000-0000-0000-0000-000000000001', 'La búsqueda sigue en las páginas siguientes';
+end $$;
+delete from public.workout_sessions where id = '50000000-0000-0000-0000-000000000003';
+reset role;
+
 select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
 set role authenticated;
 do $$
@@ -301,6 +347,7 @@ begin
   end;
   assert ok, 'No se puede finalizar una sesión ajena';
   assert not exists (select 1 from public.get_home_sessions('2000-01-01', 3)), 'Inicio es privado';
+  assert not exists (select 1 from public.search_workout_sessions()), 'El historial es privado';
 end $$;
 reset role;
 do $$
@@ -308,7 +355,7 @@ begin
   assert (select finished_at is null from public.workout_sessions where id = '50000000-0000-0000-0000-000000000001'),
     'El intento ajeno no tuvo efecto';
 end $$;
-\echo '   Estado de sesión e Inicio: OK'
+\echo '   Estado de sesión, Inicio e Historial: OK'
 
 -- 3. Beto no ve ni toca nada de Ana --------------------------------------------
 select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
