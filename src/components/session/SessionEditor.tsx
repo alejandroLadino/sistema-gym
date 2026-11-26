@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deleteSession, finishSession, getPreviousSets, saveSession } from "@/app/actions/sessions";
 import { IconCalendar, IconChevronDown, IconCopy, IconPlus, IconTrash } from "@/components/icons";
 import { formatDate, summarizeSets, todayLocal } from "@/lib/format";
+import { historyHref } from "@/lib/history-query";
 import {
   appendSets,
   clearNewPointer,
@@ -368,7 +369,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
         setFinishing(false);
       }
     }
-    router.push("/historial");
+    router.push(historyHref());
     router.refresh();
   }
 

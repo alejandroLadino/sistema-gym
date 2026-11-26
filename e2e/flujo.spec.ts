@@ -328,7 +328,7 @@ test("cuenta A: modal «Agregar ejercicio» por grupo muscular", async ({ browse
   await login(page, userA.email, userA.final);
   // Sesión de hoy (la más reciente del historial).
   await page.getByRole("navigation").getByRole("link", { name: "Historial" }).click();
-  await page.locator(".list > li").first().getByRole("link").click();
+  await page.locator(".history-card").first().click();
   await expect(page.getByRole("heading", { name: "Sesión de entrenamiento" })).toBeVisible();
 
   await page.getByRole("button", { name: "Agregar ejercicio", exact: true }).click();
@@ -555,7 +555,7 @@ test("cuenta A: corrige una sesión anterior desde el historial", async ({ brows
   const page = await newPage(browser);
   await login(page, userA.email, userA.final);
   await page.getByRole("navigation").getByRole("link", { name: "Historial" }).click();
-  await expect(page.locator(".list > li")).toHaveCount(2);
+  await expect(page.locator(".history-card")).toHaveCount(2);
   await shot(page, "10-historial");
   await page.locator(`a[href="/sesiones/${sessionA1}"]`).click();
   await expand(page, "Press de banca");
@@ -984,6 +984,163 @@ test("Inicio: hoy, semana, sesiones recientes y repetir ejercicios (375 px)", as
   await context.close();
 });
 
+test("Historial: filtros, búsqueda, meses y volver con los filtros (375 px)", async ({ browser }) => {
+  const userD = { email: `dani.${run}@example.com`, temp: "Temporal654", final: "DaniSegura987" };
+  const admin = await newPage(browser);
+  await login(admin, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await admin.goto("/admin");
+  const form = admin.getByRole("form", { name: "Crear cuenta" });
+  await form.getByLabel("Correo").fill(userD.email);
+  await form.getByLabel("Contraseña inicial").fill(userD.temp);
+  await form.getByRole("button", { name: "Crear cuenta" }).click();
+  await expect(form.getByText(`Cuenta creada para ${userD.email}`)).toBeVisible();
+  await admin.context().close();
+
+  const context = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  page.on("dialog", (d) => d.accept());
+  await login(page, userD.email, userD.temp);
+  await page.getByLabel("Nueva contraseña", { exact: true }).fill(userD.final);
+  await page.getByLabel("Repite la nueva contraseña").fill(userD.final);
+  await page.getByRole("button", { name: "Guardar contraseña" }).click();
+  await expect(page).toHaveURL(/\/$/);
+
+  // Sin sesiones: estado vacío propio (no el de filtros).
+  await page.getByRole("navigation").getByRole("link", { name: "Historial" }).click();
+  await expect(page.getByText("Todavía no tienes sesiones.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Todo", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await shot(page, "15a-historial-vacio");
+
+  // Registro con fecha pasada desde «+ Registrar sesión»: el aviso señala la fecha.
+  const pasada = isoDaysAgo(40);
+  await page.getByRole("link", { name: "+ Registrar sesión" }).first().click();
+  await expect(page.getByText("¿Es un entrenamiento anterior? Toca la fecha")).toBeVisible();
+  await page.getByLabel("Fecha del entrenamiento").fill(pasada);
+  for (const [name, muscle] of [["Sentadilla D", "Cuádriceps"], ["Prensa D", "Cuádriceps"], ["Curl D", "Bíceps"]]) {
+    await addExercise(page, name, { create: true, muscle });
+    const card = page.getByRole("region", { name });
+    await card.getByLabel(`Repeticiones por serie de ${name}`).fill("10");
+    await card.getByLabel(`Peso por serie de ${name}`, { exact: false }).fill("20");
+    await card.getByRole("button", { name: "Agregar 3 series" }).click();
+  }
+  await saved(page);
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial$/);
+
+  // Dos sesiones hoy.
+  const hoyIds: string[] = [];
+  for (const [name, muscle] of [["Press D", "Pecho"], ["Remo D", "Espalda"]]) {
+    await page.goto("/entrenar");
+    await addExercise(page, name, { create: true, muscle });
+    const card = page.getByRole("region", { name });
+    await card.getByLabel(`Repeticiones por serie de ${name}`).fill("8");
+    await card.getByLabel(`Peso por serie de ${name}`, { exact: false }).fill("50");
+    await card.getByRole("button", { name: "Agregar 3 series" }).click();
+    await saved(page);
+    hoyIds.push(page.url().split("/").pop()!);
+    await page.getByRole("button", { name: "Finalizar sesión" }).click();
+    await expect(page).toHaveURL(/\/historial$/);
+  }
+
+  // Lista por meses, de más reciente a más antigua, con las dos sesiones de hoy.
+  const cards = page.locator(".history-card");
+  await expect(cards).toHaveCount(3);
+  await expect(page.getByText("3 sesiones. Toca una")).toBeVisible();
+  const month = (iso: string) => {
+    const t = new Intl.DateTimeFormat("es", { timeZone: "UTC", month: "long", year: "numeric" }).format(new Date(`${iso}T00:00:00Z`));
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  };
+  const months = page.locator(".history-month-title");
+  await expect(months.first()).toHaveText(month(isoDaysAgo(0)));
+  await expect(months.last()).toHaveText(month(pasada));
+  await expect(cards.nth(0)).toHaveAttribute("href", `/sesiones/${hoyIds[1]}`);
+  await expect(cards.nth(1)).toHaveAttribute("href", `/sesiones/${hoyIds[0]}`);
+  await expect(cards.nth(0)).toContainText("Espalda");
+  await expect(cards.nth(2)).toContainText("Cuádriceps · Bíceps");
+  await expect(cards.nth(2)).toContainText("Sentadilla D · Prensa D · +1 más");
+  await expect(cards.nth(2)).toContainText("3 ejercicios · 9 series");
+  await shot(page, "15b-historial");
+
+  // Búsqueda: cada sesión una sola vez aunque coincidan varios ejercicios.
+  const buscar = page.getByLabel("Buscar por ejercicio");
+  await buscar.fill("d");
+  await expect(page).toHaveURL(/q=d/);
+  await expect(cards).toHaveCount(3);
+  await buscar.fill("sentadíll");
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toContainText("Sentadilla D");
+
+  // Búsqueda + rango sin resultados → «Limpiar filtros».
+  const periodo = page.getByRole("group", { name: "Período" });
+  await periodo.getByRole("button", { name: "Esta semana" }).click();
+  await expect(page.getByText("No encontramos sesiones con estos filtros.")).toBeVisible();
+  await shot(page, "15c-historial-sin-resultados");
+  await page.getByRole("button", { name: "Limpiar filtros" }).click();
+  await expect(buscar).toHaveValue("");
+  await expect(periodo.getByRole("button", { name: "Todo" })).toHaveAttribute("aria-pressed", "true");
+  await expect(cards).toHaveCount(3);
+
+  // Búsqueda combinada con un rango: «Esta semana» + «d» → las dos de hoy.
+  await periodo.getByRole("button", { name: "Esta semana" }).click();
+  await buscar.fill("d");
+  await expect(cards).toHaveCount(2);
+  await periodo.getByRole("button", { name: "Este mes" }).click();
+  await expect(cards).toHaveCount(pasada.slice(0, 7) === isoDaysAgo(0).slice(0, 7) ? 3 : 2);
+
+  // Personalizado: valida el orden y permite un solo límite.
+  await buscar.fill("");
+  await periodo.getByRole("button", { name: "Personalizado" }).click();
+  await page.getByLabel("Desde").fill(isoDaysAgo(0));
+  await page.getByLabel("Hasta").fill(isoDaysAgo(5));
+  await expect(page.locator(".alert-error")).toHaveText("«Desde» no puede ser posterior a «Hasta».");
+  await expect(cards).toHaveCount(0);
+  await page.getByLabel("Hasta").fill("");
+  await expect(cards).toHaveCount(2);
+  await page.getByLabel("Desde").fill("");
+  await page.getByLabel("Hasta").fill(isoDaysAgo(20));
+  await expect(cards).toHaveCount(1);
+  // Rango sin resultados.
+  await page.getByLabel("Desde").fill(isoDaysAgo(30));
+  await expect(page.getByText("No encontramos sesiones con estos filtros.")).toBeVisible();
+
+  // Abrir con filtros, corregir y volver: se conservan los filtros y el resumen se actualiza.
+  await periodo.getByRole("button", { name: "Esta semana" }).click();
+  await buscar.fill("press");
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first()).toContainText("1 ejercicio · 3 series");
+  await cards.first().click();
+  await expect(page).toHaveURL(new RegExp(`/sesiones/${hoyIds[0]}$`));
+  await expand(page, "Press D");
+  await page.getByRole("region", { name: "Press D" }).getByRole("button", { name: "Agregar serie", exact: true }).click();
+  await setSet(page, "Press D", 4, "55", "6");
+  await saved(page);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/historial\?rango=semana&q=press$/);
+  await expect(buscar).toHaveValue("press");
+  await expect(periodo.getByRole("button", { name: "Esta semana" })).toHaveAttribute("aria-pressed", "true");
+  await expect(cards.first()).toContainText("1 ejercicio · 4 series");
+  // «Listo» del editor también vuelve con los filtros.
+  await cards.first().click();
+  await page.getByRole("button", { name: "Listo" }).click();
+  await expect(page).toHaveURL(/\/historial\?rango=semana&q=press$/);
+  await expect(cards).toHaveCount(1);
+
+  // 375 px: filtros fáciles de tocar, sin scroll horizontal y la última tarjeta sobre la barra.
+  await page.getByRole("button", { name: "Limpiar búsqueda" }).click();
+  await periodo.getByRole("button", { name: "Todo" }).click();
+  await expect(cards).toHaveCount(3);
+  for (const chip of await periodo.getByRole("button").all()) {
+    expect((await chip.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
+  await shot(page, "15d-historial-375");
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(300);
+  const ultima = (await cards.last().boundingBox())!;
+  const nav = (await page.getByRole("navigation", { name: "Navegación principal" }).boundingBox())!;
+  expect(ultima.y + ultima.height).toBeLessThanOrEqual(nav.y);
+  await context.close();
+});
+
 test("cuenta B no accede a los datos de A, ni por URL directa", async ({ browser }) => {
   const page = await newPage(browser);
   await login(page, userB.email, userB.temp);
@@ -996,7 +1153,7 @@ test("cuenta B no accede a los datos de A, ni por URL directa", async ({ browser
   await expect(page.getByText("Tu catálogo está vacío.")).toBeVisible();
   await expect(page.locator(".empty").getByRole("button", { name: "Nuevo ejercicio" })).toBeVisible();
   await page.goto("/historial");
-  await expect(page.getByText("Aún no tienes sesiones registradas.")).toBeVisible();
+  await expect(page.getByText("Todavía no tienes sesiones.")).toBeVisible();
   for (const url of [`/sesiones/${sessionA1}`, `/progreso/${pressId}`, `/ejercicios/${pressId}`]) {
     await page.goto(url);
     await expect(page.getByRole("heading", { name: "No encontrado" })).toBeVisible();

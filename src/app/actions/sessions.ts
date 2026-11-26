@@ -7,7 +7,8 @@ import { createClient } from "@/lib/supabase/server";
 import { isIsoDate } from "@/lib/format";
 import type { SessionPayload } from "@/lib/session-draft";
 import type { ActionResult, PreviousSets } from "@/lib/types";
-import { isUuid, MAX_REPS, MAX_WEIGHT_KG } from "@/lib/validation";
+import { isUuid, MAX_REPS, MAX_WEIGHT_KG, normalizeSearch } from "@/lib/validation";
+import { MAX_QUERY_LENGTH, type HistoryCursor, type HistorySession } from "@/lib/history";
 
 const NO_ACCESS = "Tu sesión expiró o tu cuenta no tiene acceso. Vuelve a iniciar sesión; lo capturado se conserva en este dispositivo.";
 
@@ -134,4 +135,46 @@ export async function repeatSession(
     return { ok: false, error: "No se pudo crear la sesión. Revisa tu conexión y reintenta." };
   }
   return { ok: true, data: { id: newId, omitted } };
+}
+
+const HISTORY_PAGE = 30;
+
+/**
+ * Una página del historial filtrado (rango + búsqueda por ejercicio). La búsqueda
+ * se hace en la base sobre todo el historial, no solo sobre lo ya cargado.
+ */
+export async function listHistory(input: {
+  from: string | null;
+  to: string | null;
+  q: string;
+  cursor: HistoryCursor | null;
+}): Promise<ActionResult<{ sessions: HistorySession[]; total: number | null; hasMore: boolean }>> {
+  if (!(await getActionUser())) return { ok: false, error: NO_ACCESS };
+  const from = input.from && isIsoDate(input.from) ? input.from : null;
+  const to = input.to && isIsoDate(input.to) ? input.to : null;
+  const q = typeof input.q === "string" ? normalizeSearch(input.q).slice(0, MAX_QUERY_LENGTH) : "";
+  const c = input.cursor;
+  const cursor =
+    c && isIsoDate(c.date) && isUuid(c.id) && typeof c.created === "string" && !Number.isNaN(Date.parse(c.created)) ? c : null;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("search_workout_sessions", {
+    p_from: from,
+    p_to: to,
+    p_query: q || null,
+    p_before_date: cursor?.date ?? null,
+    p_before_created: cursor?.created ?? null,
+    p_before_id: cursor?.id ?? null,
+    p_limit: HISTORY_PAGE + 1,
+  });
+  if (error) return { ok: false, error: "No se pudo cargar el historial. Reintenta." };
+  const rows = (data ?? []) as HistorySession[];
+  return {
+    ok: true,
+    data: {
+      sessions: rows.slice(0, HISTORY_PAGE),
+      total: cursor ? null : (rows[0]?.total_count ?? 0),
+      hasMore: rows.length > HISTORY_PAGE,
+    },
+  };
 }
