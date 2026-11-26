@@ -9,10 +9,16 @@ export type Profile = {
   must_change_password: boolean;
 };
 
+export type MuscleGroup = {
+  id: string;
+  name: string;
+  region: string;
+};
+
 export type Exercise = {
   id: string;
   name: string;
-  muscle_group: string | null;
+  muscle_group_id: string | null;
   notes: string | null;
   archived_at: string | null;
 };

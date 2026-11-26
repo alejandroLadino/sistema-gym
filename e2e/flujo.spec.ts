@@ -55,7 +55,7 @@ async function addExercise(page: Page, name: string, opts: { create?: boolean; m
   const dialog = page.getByRole("dialog", { name: "Agregar ejercicio" });
   await dialog.getByLabel("Buscar o escribir un ejercicio nuevo").fill(name);
   if (opts.create) {
-    if (opts.muscle) await dialog.getByLabel("Grupo muscular (opcional)").fill(opts.muscle);
+    if (opts.muscle) await dialog.getByLabel("Grupo muscular (opcional)").selectOption({ label: opts.muscle });
     await dialog.getByRole("button", { name: `Crear «${name}»` }).click();
   } else {
     await dialog.getByRole("listitem").filter({ hasText: name }).first().click();
@@ -221,6 +221,55 @@ test("cuenta A: días después reutiliza el ejercicio y ve las series anteriores
   await expect(page.locator("table.data")).toContainText("10 reps");
   await expect(page.locator("table.data")).toContainText("18 reps");
   await shot(page, "09-progreso-peso-corporal");
+  await page.context().close();
+});
+
+test("cuenta A: grupos musculares del catálogo, búsqueda y filtro", async ({ browser }) => {
+  const page = await newPage(browser);
+  await login(page, userA.email, userA.final);
+  await page.getByRole("navigation").getByRole("link", { name: "Ejercicios" }).click();
+  await expect(page.getByRole("heading", { name: "Ejercicios", level: 1 })).toBeVisible();
+
+  // Los grupos elegidos al crear el ejercicio aparecen con el nombre del catálogo.
+  await expect(page.locator(".list .card").filter({ hasText: "Press de banca" })).toContainText("Pecho");
+  await expect(page.locator(".list .card").filter({ hasText: "Dominadas" })).toContainText("Espalda");
+
+  // El formulario de nuevo ejercicio ofrece solo la lista predefinida.
+  const nuevo = page.locator("section").filter({ has: page.getByRole("heading", { name: "Nuevo ejercicio" }) });
+  const select = nuevo.getByLabel("Grupo muscular");
+  await expect(select.locator("option")).toHaveCount(18); // 17 grupos + «Sin grupo muscular»
+  await nuevo.getByLabel("Nombre").fill("Curl de bíceps");
+  await select.selectOption({ label: "Bíceps" });
+  await nuevo.getByRole("button", { name: "Crear ejercicio" }).click();
+  await expect(nuevo.getByText("«Curl de bíceps» agregado")).toBeVisible();
+  await expect(page.locator(".list .card").filter({ hasText: "Curl de bíceps" })).toContainText("Bíceps");
+
+  // Buscar por el nombre del grupo, en minúsculas y sin tilde.
+  await page.getByRole("searchbox", { name: "Buscar" }).fill("biceps");
+  await page.getByRole("button", { name: "Buscar" }).click();
+  await expect(page.locator(".list > li")).toHaveCount(1);
+  await expect(page.locator(".list")).toContainText("Curl de bíceps");
+
+  // Filtrar por grupo.
+  await page.goto("/ejercicios");
+  await page.getByRole("search").getByLabel("Grupo muscular").selectOption({ label: "Espalda" });
+  await page.getByRole("button", { name: "Buscar" }).click();
+  await expect(page).toHaveURL(/grupo=espalda/);
+  await expect(page.locator(".list > li")).toHaveCount(1);
+  await expect(page.locator(".list")).toContainText("Dominadas");
+  await shot(page, "09b-ejercicios-filtro-grupo");
+
+  // Cambiar el grupo de un ejercicio desde su ficha.
+  await page.locator(".list").getByRole("link", { name: /Dominadas/ }).click();
+  await expect(page.getByRole("heading", { name: "Dominadas", level: 1 })).toBeVisible();
+  await page.getByLabel("Grupo muscular").selectOption({ label: "Bíceps" });
+  await page.getByRole("button", { name: "Guardar cambios" }).click();
+  await expect(page.getByText("Cambios guardados.")).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Grupo muscular")).toHaveValue("biceps");
+  await page.getByLabel("Grupo muscular").selectOption({ label: "Espalda" });
+  await page.getByRole("button", { name: "Guardar cambios" }).click();
+  await expect(page.getByText("Cambios guardados.")).toBeVisible();
   await page.context().close();
 });
 

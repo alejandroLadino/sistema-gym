@@ -4,6 +4,8 @@ import { notFound } from "next/navigation";
 import { setExerciseArchived } from "@/app/actions/exercises";
 import { SubmitButton } from "@/components/SubmitButton";
 import { requireUser } from "@/lib/auth";
+import { EXERCISE_COLUMNS, getMuscleGroups } from "@/lib/muscle-groups";
+import { muscleGroupName } from "@/lib/muscle-group-utils";
 import { createClient } from "@/lib/supabase/server";
 import type { Exercise } from "@/lib/types";
 import { isUuid } from "@/lib/validation";
@@ -18,25 +20,27 @@ export default async function ExercisePage({ params, searchParams }: PageProps<"
   if (!isUuid(id)) notFound();
 
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("exercises")
-    .select("id, name, muscle_group, notes, archived_at")
-    .eq("id", id)
-    .maybeSingle<Exercise>();
+  const [{ data }, groups] = await Promise.all([
+    supabase.from("exercises").select(EXERCISE_COLUMNS).eq("id", id).maybeSingle<Exercise>(),
+    getMuscleGroups(),
+  ]);
   if (!data) notFound();
   const archived = Boolean(data.archived_at);
 
   return (
     <div className="stack-lg">
       <div className="page-head">
-        <h1>{data.name}</h1>
+        <div>
+          <h1>{data.name}</h1>
+          {data.muscle_group_id ? <div className="muted">{muscleGroupName(groups, data.muscle_group_id)}</div> : null}
+        </div>
         {archived ? <span className="badge">Archivado</span> : null}
       </div>
       <Link href={`/progreso/${data.id}`} className="btn btn-block">Ver progreso e historial</Link>
 
       <section className="card stack">
         <h2>Datos del ejercicio</h2>
-        <ExerciseForm key={data.id + (data.archived_at ?? "")} exercise={data} />
+        <ExerciseForm key={data.id + (data.archived_at ?? "")} exercise={data} groups={groups} />
       </section>
 
       <section className="card stack">

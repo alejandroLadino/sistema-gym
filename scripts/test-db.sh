@@ -20,15 +20,22 @@ fi
 cleanup() { "${RUN_AS[@]}" pg_ctl -D "$WORK/data" -m immediate stop >/dev/null 2>&1 || true; rm -rf "$WORK"; }
 trap cleanup EXIT
 
-"${RUN_AS[@]}" initdb -D "$WORK/data" -U postgres -A trust >/dev/null
+"${RUN_AS[@]}" initdb -D "$WORK/data" -U postgres -A trust -E UTF8 --locale=C >/dev/null
 "${RUN_AS[@]}" pg_ctl -D "$WORK/data" -o "-p $PORT -k $WORK -c listen_addresses=''" -l "$WORK/log" -w start >/dev/null
 
 PSQL=(psql -X -q -v ON_ERROR_STOP=1 -h "$WORK" -p "$PORT" -U postgres -d postgres)
 
 "${PSQL[@]}" -f "$ROOT/supabase/tests/00_supabase_stub.sql"
+# Ganchos opcionales para probar migraciones de datos:
+#   supabase/tests/ganchos/antes_<migración>.sql   siembra datos antes de aplicarla
+#   supabase/tests/ganchos/despues_<migración>.sql verifica (y limpia) después
+HOOKS="$ROOT/supabase/tests/ganchos"
 for f in "$ROOT"/supabase/migrations/*.sql; do
-  echo "Migración: $(basename "$f")"
+  name="$(basename "$f")"
+  if [ -f "$HOOKS/antes_$name" ]; then echo "Gancho:    antes_$name"; "${PSQL[@]}" -o /dev/null -f "$HOOKS/antes_$name"; fi
+  echo "Migración: $name"
   "${PSQL[@]}" -f "$f"
+  if [ -f "$HOOKS/despues_$name" ]; then echo "Gancho:    despues_$name"; "${PSQL[@]}" -o /dev/null -f "$HOOKS/despues_$name"; fi
 done
 for f in "$ROOT"/supabase/tests/[1-9]*.sql; do
   echo "Pruebas:   $(basename "$f")"
