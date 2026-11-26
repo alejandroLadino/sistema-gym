@@ -185,6 +185,9 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
 
   // Después de recargar: 40 × 10, 40 × 10, 40 × 8.
   await page.reload();
+  // Al entrar a la sesión, las tarjetas están cerradas.
+  await expect(page.getByRole("button", { name: "Expandir Press de banca" })).toHaveAttribute("aria-expanded", "false");
+  await expand(page, "Press de banca");
   await expect(press.getByLabel(/^Peso serie \d+ de Press de banca/)).toHaveCount(3);
   for (const [n, reps] of [[1, "10"], [2, "10"], [3, "8"]] as const) {
     await expect(page.getByLabel(`Peso serie ${n} de Press de banca`, { exact: false })).toHaveValue("40");
@@ -236,6 +239,7 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
   await page.unroute("**/*");
   await page.reload();
   await expect(page.getByText("Recuperamos cambios")).toBeVisible();
+  await expand(page, "Dominadas");
   await expect(page.getByLabel("Repeticiones serie 2 de Dominadas")).toHaveValue("8");
   // Doble toque en Guardar: idempotente.
   const guardar = page.getByRole("button", { name: "Guardar", exact: true });
@@ -244,9 +248,12 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
   await shot(page, "05-sesion-guardada");
 
   await page.reload();
-  // Al abrir una sesión con varios ejercicios, solo el último queda abierto.
-  await expect(page.getByRole("button", { name: "Expandir Press de banca" })).toBeVisible();
+  // Al entrar a una sesión con varios ejercicios, todos están cerrados.
+  await expect(page.getByRole("button", { name: "Expandir Press de banca" })).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("button", { name: "Expandir Dominadas" })).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("button", { name: /^Colapsar / })).toHaveCount(0);
   await expand(page, "Press de banca");
+  await expand(page, "Dominadas");
   await expect(page.getByLabel("Peso serie 4 de Press de banca", { exact: false })).toHaveValue("42,5");
   await expect(page.getByLabel("Repeticiones serie 2 de Dominadas")).toHaveValue("8");
   await expect(page.getByLabel("Peso serie 1 de Dominadas", { exact: false })).toHaveValue("");
@@ -284,6 +291,7 @@ test("cuenta A: días después reutiliza el ejercicio y copia la última sesión
   await setSet(page, "Press de banca", 4, "45", "6");
   await saved(page);
   await page.reload();
+  await expand(page, "Press de banca");
   await expect(page.getByLabel("Peso serie 4 de Press de banca", { exact: false })).toHaveValue("45");
   await expect(page.getByLabel("Repeticiones serie 3 de Press de banca")).toHaveValue("8");
   await shot(page, "07-sesion-nueva");
@@ -616,6 +624,7 @@ test("cuenta A: Progreso: lista, detalle, métricas, rangos y correcciones", asy
 
   // Corregir la sesión 2 desde «Ver sesión»: 40 × 10, 10, 10 → 30 reps totales.
   await page.locator(`a[href="/sesiones/${session2}"]`).click();
+  await expand(page, "Remo con barra");
   await page.getByLabel("Repeticiones serie 3 de Remo con barra").fill("10");
   await saved(page);
   await page.goto("/progreso");
@@ -758,7 +767,7 @@ async function editorFlow(page: Page, suffix: string, mobile: boolean) {
   await expect(page.getByRole("button", { name: `Expandir ${sentadilla}` })).toBeVisible();
   await shot(page, `13-editor-${suffix}`);
 
-  // Recargar: todo se conserva (con varios ejercicios, solo el último queda abierto).
+  // Recargar: todo se conserva (al entrar, todas las tarjetas están cerradas).
   await page.reload();
   await expect(card.locator(".ex-summary")).toHaveText("3 series · Mejor serie: 20 kg × 10");
   await expand(page, sentadilla);
