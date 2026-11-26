@@ -24,18 +24,3 @@ export const IconTrash = () => (
 export const IconCopy = () => (
   <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h8" /></svg>
 );
-export const IconUp = () => (
-  <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><path d="m6 15 6-6 6 6" /></svg>
-);
-export const IconDown = () => (
-  <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-);
-export const IconArrowUp = () => (
-  <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6" /></svg>
-);
-export const IconArrowDown = () => (
-  <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
-);
-export const IconChevron = () => (
-  <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-);

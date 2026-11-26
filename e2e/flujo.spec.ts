@@ -174,9 +174,10 @@ test("cuenta A: registra Press de banca y peso corporal, con fallo y reintento",
   await addExercise(page, "Dominadas", { create: true, muscle: "Espalda" });
   const dominadas = page.getByRole("region", { name: "Dominadas" });
 
-  // Al agregar otro ejercicio, el anterior se colapsa y muestra su resumen.
+  // Al agregar otro ejercicio, el anterior se colapsa: solo queda su nombre.
   await expect(page.getByRole("button", { name: "Expandir Press de banca" })).toHaveAttribute("aria-expanded", "false");
-  await expect(press.locator(".ex-summary")).toHaveText("4 series · 2 × 10 a 40 kg · 40 kg × 8 · 42,5 kg × 6");
+  await expect(page.getByRole("button", { name: "Expandir Press de banca" })).toHaveText("Press de banca");
+  await expect(press.getByRole("button", { name: /^(Subir|Bajar) / })).toHaveCount(0);
   await expect(press.getByLabel(/^Peso serie \d+ de Press de banca/)).toHaveCount(0);
   await shot(page, "05b-ejercicio-colapsado");
   await page.getByRole("button", { name: "Expandir Press de banca" }).click();
