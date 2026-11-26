@@ -1,0 +1,12 @@
+# Configuración mínima para Supabase CLI (desarrollo local con `npx supabase start`).
+# Los valores no indicados usan los predeterminados de la CLI.
+project_id = "sistema-gym"
+
+[auth]
+site_url = "http://localhost:3000"
+# Las cuentas solo las crea el administrador (service_role); sin registro público.
+enable_signup = false
+
+[auth.email]
+enable_signup = false
+enable_confirmations = false
