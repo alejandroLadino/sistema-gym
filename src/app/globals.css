@@ -216,11 +216,7 @@ input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
   text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
 }
 .ex-toggle:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 2px; border-radius: 8px; }
-.ex-chevron { display: inline-flex; color: var(--muted); transition: transform 0.15s; flex: none; }
-.ex-chevron svg { width: 20px; height: 20px; }
-.ex-toggle[aria-expanded="false"] .ex-chevron { transform: rotate(-90deg); }
-.ex-title { display: grid; gap: 2px; min-width: 0; }
-.ex-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 0.88rem; font-weight: 600; }
+.ex-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
 .exercise-card[data-collapsed] { padding-top: 12px; padding-bottom: 12px; }
 /* Sesión anterior: fecha y resumen compacto */
 .previous-line { margin: 8px 0 0; font-size: 0.9rem; }

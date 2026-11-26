@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deleteSession, getPreviousSets, saveSession } from "@/app/actions/sessions";
-import { IconArrowDown, IconArrowUp, IconChevron, IconCopy, IconPlus, IconTrash } from "@/components/icons";
+import { IconCopy, IconPlus, IconTrash } from "@/components/icons";
 import { formatDate, summarizeSets, todayLocal } from "@/lib/format";
 import {
   appendSets,
@@ -274,15 +274,6 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
   const updateSet = (exKey: string, setKey: string, patch: Partial<DraftSet>) =>
     updateExercise(exKey, (e) => ({ ...e, sets: e.sets.map((s) => (s.key === setKey ? { ...s, ...patch } : s)) }));
 
-  const moveExercise = (index: number, delta: number) =>
-    update((d) => {
-      const list = [...d.exercises];
-      const target = index + delta;
-      if (target < 0 || target >= list.length) return d;
-      [list[index], list[target]] = [list[target], list[index]];
-      return { ...d, exercises: list };
-    });
-
   const removeExercise = (ex: DraftExercise) => {
     if (ex.sets.some((s) => !isSetBlank(s)) && !window.confirm(`¿Quitar ${ex.name} de esta sesión?`)) return;
     update((d) => ({ ...d, exercises: d.exercises.filter((e) => e.key !== ex.key) }));
@@ -405,7 +396,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
           />
         </label>
 
-        {draft.exercises.map((ex, index) => {
+        {draft.exercises.map((ex) => {
           const prev = prevForDate?.[ex.exerciseId];
           const empty = hasNoSets(ex.sets);
           const showQuick = empty || Boolean(quickOpen[ex.key]);
@@ -426,29 +417,15 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial }: Prop
                   aria-label={`${isCollapsed ? "Expandir" : "Colapsar"} ${ex.name}`}
                   onClick={() => toggleCollapsed(ex.key)}
                 >
-                  <span className="ex-chevron" aria-hidden="true"><IconChevron /></span>
                   <span className="ex-title">
                     <h3>{ex.name}</h3>
-                    {isCollapsed ? (
-                      <span className="ex-summary">
-                        {summary.text}
-                        {summary.incomplete ? <span className="badge badge-warning">Faltan datos</span> : null}
-                      </span>
-                    ) : null}
+                    {isCollapsed && summary.incomplete ? <span className="badge badge-warning">Faltan datos</span> : null}
                     {ex.archived ? <span className="badge">Archivado</span> : null}
                   </span>
                 </button>
-                <div className="row" style={{ flexWrap: "nowrap", gap: 2 }}>
-                  <button type="button" className="btn btn-ghost btn-icon" aria-label={`Subir ${ex.name}`} onClick={() => moveExercise(index, -1)} disabled={index === 0}>
-                    <IconArrowUp />
-                  </button>
-                  <button type="button" className="btn btn-ghost btn-icon" aria-label={`Bajar ${ex.name}`} onClick={() => moveExercise(index, 1)} disabled={index === draft.exercises.length - 1}>
-                    <IconArrowDown />
-                  </button>
-                  <button type="button" className="btn btn-ghost btn-icon" aria-label={`Quitar ${ex.name}`} onClick={() => removeExercise(ex)}>
-                    <IconTrash />
-                  </button>
-                </div>
+                <button type="button" className="btn btn-ghost btn-icon" aria-label={`Quitar ${ex.name}`} onClick={() => removeExercise(ex)}>
+                  <IconTrash />
+                </button>
               </div>
 
               {!isCollapsed ? (
