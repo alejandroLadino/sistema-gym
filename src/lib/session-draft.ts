@@ -81,22 +81,22 @@ export function parseBlocks(input: DraftBlocks): { ok: true; set: SetValue } | {
   let error: string | null = null;
   const rounds = input.rounds.trim();
   const roundsN = /^\d{1,2}$/.test(rounds) ? Number(rounds) : NaN;
-  if (!(roundsN >= 1 && roundsN <= MAX_ROUNDS)) error = `Repetir secuencia: un entero de 1 a ${MAX_ROUNDS}`;
-  if (input.items.length === 0) error ??= "Agrega al menos un bloque";
-  if (input.items.length > MAX_BLOCKS) error ??= `Máximo ${MAX_BLOCKS} bloques`;
+  if (!(roundsN >= 1 && roundsN <= MAX_ROUNDS)) error = `Vueltas por serie: un entero de 1 a ${MAX_ROUNDS}`;
+  if (input.items.length === 0) error ??= "Agrega al menos un paso";
+  if (input.items.length > MAX_BLOCKS) error ??= `Máximo ${MAX_BLOCKS} pasos`;
   const blocks: Block[] = [];
   input.items.forEach((b, i) => {
     const weight = parseWeight(b.weight);
     if (b.type === "reps") {
       const reps = parseReps(b.value);
-      if (!reps.ok) blockErrors[b.key] = `Bloque ${i + 1}: ${reps.error.toLowerCase()}`;
-      else if (!weight.ok) blockErrors[b.key] = `Bloque ${i + 1}: ${weight.error.toLowerCase()}`;
+      if (!reps.ok) blockErrors[b.key] = `Paso ${i + 1}: ${reps.error.toLowerCase()}`;
+      else if (!weight.ok) blockErrors[b.key] = `Paso ${i + 1}: ${weight.error.toLowerCase()}`;
       else blocks.push({ type: "reps", reps: reps.value, weight_kg: weight.value });
     } else {
       const raw = b.value.trim();
       const secs = /^\d{1,4}$/.test(raw) ? Number(raw) : NaN;
-      if (!(secs >= 1 && secs <= MAX_HOLD_SECONDS)) blockErrors[b.key] = `Bloque ${i + 1}: segundos de 1 a ${MAX_HOLD_SECONDS}`;
-      else if (!weight.ok) blockErrors[b.key] = `Bloque ${i + 1}: ${weight.error.toLowerCase()}`;
+      if (!(secs >= 1 && secs <= MAX_HOLD_SECONDS)) blockErrors[b.key] = `Paso ${i + 1}: segundos de 1 a ${MAX_HOLD_SECONDS}`;
+      else if (!weight.ok) blockErrors[b.key] = `Paso ${i + 1}: ${weight.error.toLowerCase()}`;
       else blocks.push({ type: "hold", seconds: secs, weight_kg: weight.value });
     }
   });

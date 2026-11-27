@@ -85,7 +85,7 @@ describe("formulario de rutina", () => {
     });
     expect(routineToPayload("r", "Hombro", [{ ...row("a", "e1"), plan: { ...plan, rounds: "0" } }])).toMatchObject({
       ok: false,
-      targets: { a: { plan: expect.stringMatching(/Repetir secuencia/) } },
+      targets: { a: { plan: expect.stringMatching(/Vueltas por serie/) } },
     });
   });
 

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deleteSession, finishSession, getPreviousSets, saveSession } from "@/app/actions/sessions";
 import { ActionsMenu } from "@/components/ActionsMenu";
 import { IconCalendar, IconChevronDown, IconCopy, IconList, IconPencil, IconPlus, IconTrash } from "@/components/icons";
-import { formatBlock, formatSequence, isBlockSet, sameShape, type BlockPlan } from "@/lib/blocks";
+import { formatSequence, formatSetTotals, formatStep, isBlockSet, sameShape, type BlockPlan } from "@/lib/blocks";
 import { formatDate, summarizeSets, todayLocal } from "@/lib/format";
 import { historyHref } from "@/lib/history-query";
 import { formatTarget } from "@/lib/routines";
@@ -940,7 +940,10 @@ function replaceNotice(ex: DraftExercise): string {
   return `Elige el ejercicio que ocupará el lugar de «${ex.name}». Se quitará «${ex.name}»${series} de esta sesión; seguirá en tu catálogo y en tus otras sesiones.`;
 }
 
-/** Fila de una serie por bloques: resumen compacto que se expande para ver la secuencia. */
+/**
+ * Serie por bloques en la tarjeta: primero los totales («Serie 1 · 21 reps · 21 s de
+ * sostén»); al tocar el resumen se ven los pasos con sus cargas y las acciones.
+ */
 function BlockSetRow({
   n,
   exerciseName,
@@ -958,37 +961,37 @@ function BlockSetRow({
 }) {
   const parsed = parseBlocks(blocks);
   const set = parsed.ok ? parsed.set : null;
+  const totals = set ? formatSetTotals(set) : "datos incompletos";
   return (
-    <div>
-      <div className="set-row set-row-blocks">
-        <span className="num">{n}</span>
-        <details className="block-set">
-          <summary aria-label={`Serie ${n} de ${exerciseName}: ${set ? formatSequence(set.blocks!, set.rounds ?? 1) : "datos incompletos"}`}>
-            <span className="block-set-text">{set ? formatSequence(set.blocks!, set.rounds ?? 1) : "Serie por bloques con datos incompletos"}</span>
-          </summary>
-          {set ? (
-            <ol className="block-set-list">
-              {set.blocks!.map((b, i) => (
-                <li key={i}>
-                  <span className="muted">Bloque {i + 1}:</span> {formatBlock(b)}
-                </li>
-              ))}
-              <li className="muted">Repetir secuencia: {set.rounds === 1 ? "1 vez" : `${set.rounds} veces`}</li>
-            </ol>
-          ) : null}
-          <div className="block-set-actions">
-            <button type="button" className="btn btn-sm" onClick={onEdit}>
-              <IconPencil /> Editar
-            </button>
-            <button type="button" className="btn btn-sm btn-ghost" aria-label={`Quitar serie ${n} de ${exerciseName}`} onClick={onRemove}>
-              <IconTrash /> Quitar
-            </button>
-          </div>
-        </details>
-        <button type="button" className="btn btn-ghost btn-icon" aria-label={`Editar serie ${n} de ${exerciseName}`} onClick={onEdit}>
-          <IconPencil />
-        </button>
-      </div>
+    <div className="set-row-blocks">
+      <details className="block-set">
+        <summary aria-label={`Serie ${n} de ${exerciseName}: ${totals}${set ? `. ${formatSequence(set.blocks!, set.rounds ?? 1)}` : ""}`}>
+          <span className="block-set-head">
+            <span className="block-set-totals">
+              Serie {n} · {set ? formatSetTotals(set) : "Faltan datos"}
+            </span>
+            {set ? <span className="block-set-text">{formatSequence(set.blocks!, set.rounds ?? 1)}</span> : null}
+          </span>
+        </summary>
+        {set ? (
+          <ol className="block-set-list">
+            {set.blocks!.map((b, i) => (
+              <li key={i}>
+                {i + 1} · {formatStep(b)}
+              </li>
+            ))}
+            <li className="muted">Vueltas por serie: {set.rounds}</li>
+          </ol>
+        ) : null}
+        <div className="block-set-actions">
+          <button type="button" className="btn btn-sm btn-primary" aria-label={`Editar serie ${n} de ${exerciseName}`} onClick={onEdit}>
+            <IconPencil /> Editar serie
+          </button>
+          <button type="button" className="btn btn-sm btn-ghost" aria-label={`Quitar serie ${n} de ${exerciseName}`} onClick={onRemove}>
+            <IconTrash /> Quitar
+          </button>
+        </div>
+      </details>
       {error ? <p className="set-error">Serie {n}: {error}</p> : null}
     </div>
   );

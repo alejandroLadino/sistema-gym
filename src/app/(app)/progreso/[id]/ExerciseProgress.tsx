@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import { ProgressChart } from "@/components/ProgressChart";
-import { formatBlock, isBlockSet } from "@/lib/blocks";
+import { formatStep, isBlockSet } from "@/lib/blocks";
 import { formatDate, formatKg, formatSet, todayLocal } from "@/lib/format";
 import { UNCLASSIFIED_LABEL } from "@/lib/muscle-group-utils";
 import {
@@ -218,10 +218,10 @@ function HistoryItem({ session, weighted }: { session: SessionStat; weighted: bo
                 <ol className="block-set-list">
                   {set.blocks.map((b, j) => (
                     <li key={j}>
-                      <span className="muted">Bloque {j + 1}:</span> {formatBlock(b)}
+                      {j + 1} · {formatStep(b)}
                     </li>
                   ))}
-                  <li className="muted">Repetir secuencia: {set.rounds === 1 ? "1 vez" : `${set.rounds} veces`}</li>
+                  <li className="muted">Vueltas por serie: {set.rounds}</li>
                 </ol>
               </details>
             </li>
