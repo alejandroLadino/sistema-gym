@@ -30,6 +30,8 @@ function isValidPayload(p: SessionPayload): boolean {
         s.blocks != null
           ? isValidBlockSet(s)
           : (s.bar_only === undefined || typeof s.bar_only === "boolean") &&
+            (s.bodyweight === undefined || typeof s.bodyweight === "boolean") &&
+            !(s.bodyweight && (s.bar_only || s.weight_kg !== null)) &&
             Number.isInteger(s.reps) &&
             (s.reps as number) >= 1 &&
             (s.reps as number) <= MAX_REPS &&

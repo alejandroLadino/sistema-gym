@@ -782,6 +782,50 @@ delete from public.exercises where id in ('e0000000-0000-0000-0000-00000000000f'
 reset role;
 \echo '   Solo barra (guardado, compatibilidad, Progreso, clasificación, peso posterior): OK'
 
+-- Carga explícita «Peso corporal» ---------------------------------------------------------
+select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+insert into public.exercises (id, name, muscle_group_id) values
+  ('e0000000-0000-0000-0000-000000000011', 'Fondos en paralelas', 'triceps');
+do $$
+declare j jsonb; r record; ok boolean; bad jsonb;
+begin
+  perform public.save_workout_session(jsonb_build_object('id', '50000000-0000-0000-0000-000000000018', 'session_date', '2026-11-27',
+    'exercises', jsonb_build_array(jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-000000000011', 'sets', jsonb_build_array(
+      '{"reps": 12, "weight_kg": null, "bodyweight": true}'::jsonb,
+      '{"reps": 10, "weight_kg": null}'::jsonb,
+      '{"rounds": 2, "blocks": [{"type": "reps", "reps": 5, "weight_kg": null, "bodyweight": true}, {"type": "hold", "seconds": 10, "weight_kg": null}]}'::jsonb)))));
+  j := public.get_workout_session('50000000-0000-0000-0000-000000000018') -> 'exercises' -> 0 -> 'sets';
+  -- Peso corporal explícito se distingue de un registro con el peso vacío (sin marca).
+  assert j -> 0 = '{"reps": 12, "weight_kg": null, "bodyweight": true}'::jsonb, format('Peso corporal: %s', j -> 0);
+  assert j -> 1 = '{"reps": 10, "weight_kg": null}'::jsonb, format('Peso vacío sin marca: %s', j -> 1);
+  assert (j -> 2 -> 'blocks' -> 0 ->> 'bodyweight')::boolean, 'Bloque con peso corporal';
+  -- Métricas sin cambios: reps 12 + 10 + 2 × 5 = 32, sin máximo; peso corporal.
+  select * into r from public.get_exercise_progress('e0000000-0000-0000-0000-000000000011', null, null);
+  assert r.total_reps = 32 and r.max_weight_kg is null, format('Métricas: %s', row_to_json(r));
+  assert not (select uses_weight from public.get_progress_overview() where exercise_id = 'e0000000-0000-0000-0000-000000000011'),
+    'Clasificado como peso corporal';
+  -- No se combina con peso ni con «Solo barra».
+  foreach bad in array array[
+    '{"reps": 10, "weight_kg": 20, "bodyweight": true}', '{"reps": 10, "weight_kg": null, "bodyweight": true, "bar_only": true}',
+    '{"rounds": 1, "blocks": [{"type": "reps", "reps": 5, "weight_kg": 10, "bodyweight": true}]}',
+    '{"rounds": 1, "blocks": [{"type": "reps", "reps": 5, "bodyweight": true, "bar_only": true}]}',
+    '{"rounds": 1, "blocks": [{"type": "reps", "reps": 5, "bodyweight": "sí"}]}'
+  ]::jsonb[] loop
+    ok := false;
+    begin
+      perform public.save_workout_session(jsonb_build_object('id', '50000000-0000-0000-0000-000000000019', 'session_date', '2026-11-27',
+        'exercises', jsonb_build_array(jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-000000000011', 'sets', jsonb_build_array(bad)))));
+    exception when check_violation then ok := true;
+    end;
+    assert ok, format('Combinación inválida aceptada: %s', bad);
+  end loop;
+end $$;
+delete from public.workout_sessions where id = '50000000-0000-0000-0000-000000000018';
+delete from public.exercises where id = 'e0000000-0000-0000-0000-000000000011';
+reset role;
+\echo '   Carga «Peso corporal» (explícita, compatible, métricas, validación): OK'
+
 select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
 set role authenticated;
 do $$

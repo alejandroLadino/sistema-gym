@@ -13,6 +13,7 @@ import { formatTarget } from "@/lib/routines";
 import {
   appendSets,
   blocksToDraft,
+  loadOf,
   cloneBlocks,
   parseBlocks,
   type DraftBlocks,
@@ -41,6 +42,7 @@ import { ExercisePicker } from "./ExercisePicker";
 import { CardMenu } from "./CardMenu";
 import { useCardDrag } from "./useCardDrag";
 import { BlockSetSheet, emptyBlocks } from "./BlockSetSheet";
+import { BarWeightField, LoadPicker, loadLabel } from "./LoadPicker";
 import { QuickAddSets, quickRepsInputId } from "./QuickAddSets";
 
 type Status = "empty" | "dirty" | "invalid" | "saving" | "saved" | "error";
@@ -82,6 +84,8 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
   const [prevError, setPrevError] = useState(false);
   /** Captura rápida abierta en ejercicios que ya tienen series (en los vacíos siempre se muestra). */
   const [quickOpen, setQuickOpen] = useState<Record<string, boolean>>({});
+  /** Serie cuya carga se está editando (selector bajo la fila). */
+  const [loadEdit, setLoadEdit] = useState<string | null>(null);
   /** Panel de serie por bloques: agregar (con cantidad) o editar una serie concreta. */
   const [blockSheet, setBlockSheet] = useState<{
     exKey: string;
@@ -781,7 +785,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
                       {ex.sets.some((st) => !st.blocks) ? (
                         <div className="set-row set-head" aria-hidden="true">
                           <span>Serie</span>
-                          <span>Peso (kg)</span>
+                          <span>Carga</span>
                           <span>Reps</span>
                           <span />
                         </div>
@@ -801,31 +805,45 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
                         <div key={set.key}>
                           <div className="set-row">
                             <span className="num">{i + 1}</span>
-                            <div className="weight-cell">
-                              <input
-                                className="input"
-                                inputMode="decimal"
-                                autoComplete="off"
-                                placeholder={set.bar ? "barra" : "—"}
-                                aria-label={`Peso serie ${i + 1} de ${ex.name} (kg, vacío si es peso corporal)`}
-                                aria-invalid={setErrors[set.key] ? true : undefined}
-                                value={set.weight}
-                                onChange={(e) => updateSet(ex.key, set.key, { weight: e.target.value })}
-                                enterKeyHint="next"
-                              />
-                              {/* «Solo barra»: a la vista con el peso vacío o si ya está marcada. */}
-                              {set.bar || !set.weight.trim() ? (
-                                <button
-                                  type="button"
-                                  className="bar-toggle"
-                                  aria-pressed={Boolean(set.bar)}
-                                  aria-label={`Solo barra serie ${i + 1} de ${ex.name}`}
-                                  onClick={() => updateSet(ex.key, set.key, { bar: !set.bar })}
-                                >
-                                  Solo barra
-                                </button>
-                              ) : null}
-                            </div>
+                            {(() => {
+                              // Celda de carga: el peso (con peso o registro sin modo) o la etiqueta del modo.
+                              const mode = loadOf(set);
+                              const open = loadEdit === set.key;
+                              const toggle = () => setLoadEdit(open ? null : set.key);
+                              const label = `Carga de la serie ${i + 1} de ${ex.name}: ${loadLabel(mode)}`;
+                              if (mode === "bar" || mode === "body") {
+                                return (
+                                  <button
+                                    type="button"
+                                    className="load-chip"
+                                    data-mode={mode}
+                                    aria-label={label}
+                                    aria-expanded={open}
+                                    onClick={toggle}
+                                  >
+                                    {mode === "body" ? "Corporal" : set.weight.trim() ? `Barra ${set.weight} kg` : "Solo barra"}
+                                  </button>
+                                );
+                              }
+                              return (
+                                <div className="load-input">
+                                  <input
+                                    className="input"
+                                    inputMode="decimal"
+                                    autoComplete="off"
+                                    placeholder="—"
+                                    aria-label={`Peso serie ${i + 1} de ${ex.name} (kg)`}
+                                    aria-invalid={setErrors[set.key] ? true : undefined}
+                                    value={set.weight}
+                                    onChange={(e) => updateSet(ex.key, set.key, { weight: e.target.value })}
+                                    enterKeyHint="next"
+                                  />
+                                  <button type="button" className="load-mode-btn" aria-label={label} aria-expanded={open} onClick={toggle}>
+                                    kg
+                                  </button>
+                                </div>
+                              );
+                            })()}
                             <input
                               className="input"
                               inputMode="numeric"
@@ -847,6 +865,32 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
                               <IconTrash />
                             </button>
                           </div>
+                          {loadEdit === set.key ? (
+                            <div className="load-editor">
+                              <LoadPicker
+                                value={loadOf(set)}
+                                label={`Carga de la serie ${i + 1} de ${ex.name}`}
+                                onChange={(m) =>
+                                  // Solo cambia esta serie. Al pasar a barra o peso corporal, el peso anterior no es el de la barra.
+                                  updateSet(ex.key, set.key, {
+                                    load: m,
+                                    bar: undefined,
+                                    ...(m !== "weight" && m !== loadOf(set) ? { weight: "" } : {}),
+                                  })
+                                }
+                              />
+                              {loadOf(set) === "bar" ? (
+                                <BarWeightField
+                                  value={set.weight}
+                                  onChange={(v) => updateSet(ex.key, set.key, { weight: v })}
+                                  label={`Peso de la barra serie ${i + 1} de ${ex.name} (kg, opcional)`}
+                                />
+                              ) : null}
+                              <button type="button" className="btn btn-sm" onClick={() => setLoadEdit(null)}>
+                                Listo
+                              </button>
+                            </div>
+                          ) : null}
                           {setErrors[set.key] ? <p className="set-error">Serie {i + 1}: {setErrors[set.key]}</p> : null}
                         </div>
                         ),
@@ -859,7 +903,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
                       key={`${ex.key}-${ex.sets.length}`}
                       exerciseKey={ex.key}
                       exerciseName={ex.name}
-                      defaults={lastSet ? { reps: lastSet.reps, weight: lastSet.weight, bar: lastSet.bar } : undefined}
+                      defaults={lastSet ? { reps: lastSet.reps, weight: lastSet.weight, load: loadOf(lastSet) } : undefined}
                       onAdd={(sets) => addQuickSets(ex, sets)}
                       onCancel={empty ? undefined : () => setQuickOpen((q) => ({ ...q, [ex.key]: false }))}
                     />

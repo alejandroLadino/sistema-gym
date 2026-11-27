@@ -6,11 +6,38 @@ import type { Target } from "./routines";
 import { parseReps, parseWeight, type Parsed } from "./validation";
 
 /** Bloque editable de una serie por bloques (valores como texto). */
-export type DraftBlock = { key: string; type: "reps" | "hold"; value: string; weight: string; bar?: boolean };
+/**
+ * Carga de una serie o bloque: «Con peso», «Solo barra» o «Peso corporal».
+ * Sin modo (undefined): registro anterior con el peso tal cual (vacío = sin indicar);
+ * no se le asigna un modo automáticamente.
+ */
+export type LoadMode = "weight" | "bar" | "body";
+
+/** `bar` es el formato anterior de «Solo barra» en borradores locales. */
+export type DraftBlock = { key: string; type: "reps" | "hold"; value: string; weight: string; load?: LoadMode; bar?: boolean };
 /** Secuencia editable: bloques en orden y veces que se repite dentro de la serie. */
 export type DraftBlocks = { rounds: string; items: DraftBlock[] };
 /** Serie simple (reps/peso) o, si trae `blocks`, serie por bloques. */
-export type DraftSet = { key: string; reps: string; weight: string; blocks?: DraftBlocks; bar?: boolean };
+export type DraftSet = { key: string; reps: string; weight: string; blocks?: DraftBlocks; load?: LoadMode; bar?: boolean };
+
+/** Modo de carga efectivo (acepta el formato anterior `bar`). */
+export function loadOf(x: { load?: LoadMode; bar?: boolean }): LoadMode | undefined {
+  return x.load ?? (x.bar ? "bar" : undefined);
+}
+
+/** Modo de una serie o bloque guardado: barra / corporal explícitos; con peso si lo tiene; si no, sin modo. */
+function loadFromSaved(x: { weight_kg: number | null; bar_only?: boolean; bodyweight?: boolean }): LoadMode | undefined {
+  if (x.bar_only) return "bar";
+  if (x.bodyweight) return "body";
+  return x.weight_kg !== null && x.weight_kg !== undefined ? "weight" : undefined;
+}
+
+/** Marcas que se guardan según el modo (peso corporal ignora el peso escrito). */
+function loadFields(load: LoadMode | undefined, weight: number | null): { weight_kg: number | null; bar_only?: true; bodyweight?: true } {
+  if (load === "bar") return { weight_kg: weight, bar_only: true };
+  if (load === "body") return { weight_kg: null, bodyweight: true };
+  return { weight_kg: weight };
+}
 export type DraftExercise = {
   key: string;
   exerciseId: string;
@@ -61,7 +88,10 @@ export function blocksToDraft(blocks: Block[] | BlockPlanItem[], rounds: number)
       type: b.type,
       value: String(b.type === "reps" ? b.reps : b.seconds),
       weight: "weight_kg" in b ? weightToInput(b.weight_kg) : "",
-      ...("bar_only" in b && b.bar_only ? { bar: true } : {}),
+      ...(() => {
+        const load = "weight_kg" in b ? loadFromSaved(b) : undefined;
+        return load ? { load } : {};
+      })(),
     })),
   };
 }
@@ -70,7 +100,10 @@ export function setsToDraft(sets: SetValue[]): DraftSet[] {
   return sets.map((s) =>
     isBlockSet(s)
       ? { key: newKey(), reps: "", weight: "", blocks: blocksToDraft(s.blocks, s.rounds ?? 1) }
-      : { key: newKey(), reps: String(s.reps), weight: weightToInput(s.weight_kg), ...(s.bar_only ? { bar: true } : {}) },
+      : (() => {
+          const load = loadFromSaved(s);
+          return { key: newKey(), reps: String(s.reps), weight: load === "body" ? "" : weightToInput(s.weight_kg), ...(load ? { load } : {}) };
+        })(),
   );
 }
 
@@ -87,18 +120,19 @@ export function parseBlocks(input: DraftBlocks): { ok: true; set: SetValue } | {
   if (input.items.length > MAX_BLOCKS) error ??= `Máximo ${MAX_BLOCKS} pasos`;
   const blocks: Block[] = [];
   input.items.forEach((b, i) => {
-    const weight = parseWeight(b.weight);
+    const load = loadOf(b);
+    const weight = load === "body" ? ({ ok: true, value: null } as const) : parseWeight(b.weight);
     if (b.type === "reps") {
       const reps = parseReps(b.value);
       if (!reps.ok) blockErrors[b.key] = `Paso ${i + 1}: ${reps.error.toLowerCase()}`;
       else if (!weight.ok) blockErrors[b.key] = `Paso ${i + 1}: ${weight.error.toLowerCase()}`;
-      else blocks.push({ type: "reps", reps: reps.value, weight_kg: weight.value, ...(b.bar ? { bar_only: true } : {}) });
+      else blocks.push({ type: "reps", reps: reps.value, ...loadFields(load, weight.value) });
     } else {
       const raw = b.value.trim();
       const secs = /^\d{1,4}$/.test(raw) ? Number(raw) : NaN;
       if (!(secs >= 1 && secs <= MAX_HOLD_SECONDS)) blockErrors[b.key] = `Paso ${i + 1}: segundos de 1 a ${MAX_HOLD_SECONDS}`;
       else if (!weight.ok) blockErrors[b.key] = `Paso ${i + 1}: ${weight.error.toLowerCase()}`;
-      else blocks.push({ type: "hold", seconds: secs, weight_kg: weight.value, ...(b.bar ? { bar_only: true } : {}) });
+      else blocks.push({ type: "hold", seconds: secs, ...loadFields(load, weight.value) });
     }
   });
   if (error || Object.keys(blockErrors).length) {
@@ -138,7 +172,8 @@ export function sessionToDraft(session: SessionData): Draft {
 }
 
 export function isSetBlank(set: DraftSet): boolean {
-  if (set.blocks || set.bar) return false;
+  const load = loadOf(set);
+  if (set.blocks || load === "bar" || load === "body") return false;
   return set.reps.trim() === "" && set.weight.trim() === "";
 }
 
@@ -165,11 +200,12 @@ export function draftToPayload(
         continue;
       }
       if (isSetBlank(set)) continue;
+      const load = loadOf(set);
       const reps = parseReps(set.reps);
-      const weight = parseWeight(set.weight);
+      const weight = load === "body" ? ({ ok: true, value: null } as const) : parseWeight(set.weight);
       if (!reps.ok) errors.sets[set.key] = reps.error;
       else if (!weight.ok) errors.sets[set.key] = weight.error;
-      else sets.push({ reps: reps.value, weight_kg: weight.value, ...(set.bar ? { bar_only: true } : {}) });
+      else sets.push({ reps: reps.value, ...loadFields(load, weight.value) });
     }
     return { exercise_id: ex.exerciseId, sets };
   });
@@ -189,7 +225,7 @@ export function draftToPayload(
 
 export const MAX_QUICK_SETS = 20;
 
-export type QuickAddInput = { count: string; reps: string; weight: string; bar?: boolean };
+export type QuickAddInput = { count: string; reps: string; weight: string; load?: LoadMode };
 export type QuickAddErrors = Partial<Record<keyof QuickAddInput, string>>;
 
 /** Cantidad de series de la captura rápida (1 a 20). */
@@ -211,7 +247,7 @@ export function buildQuickSets(
   const errors: QuickAddErrors = {};
   const count = parseSetCount(input.count);
   const reps = parseReps(input.reps);
-  const weight = parseWeight(input.weight);
+  const weight = input.load === "body" ? ({ ok: true, value: null } as const) : parseWeight(input.weight);
   if (!count.ok) errors.count = count.error;
   if (!reps.ok) errors.reps = reps.error;
   if (!weight.ok) errors.weight = weight.error;
@@ -223,7 +259,7 @@ export function buildQuickSets(
       key: newKey(),
       reps: String(reps.value),
       weight: weightText,
-      ...(input.bar ? { bar: true } : {}),
+      ...(input.load ? { load: input.load } : {}),
     })),
   };
 }
@@ -254,9 +290,10 @@ export function exerciseSummary(sets: DraftSet[]): { count: number; text: string
       continue;
     }
     if (isSetBlank(set)) continue;
+    const load = loadOf(set);
     const reps = parseReps(set.reps);
-    const weight = parseWeight(set.weight);
-    if (reps.ok && weight.ok) valid.push({ reps: reps.value, weight_kg: weight.value, ...(set.bar ? { bar_only: true } : {}) });
+    const weight = load === "body" ? ({ ok: true, value: null } as const) : parseWeight(set.weight);
+    if (reps.ok && weight.ok) valid.push({ reps: reps.value, ...loadFields(load, weight.value) });
     else incomplete = true;
   }
   if (valid.length === 0) return { count: 0, text: "Sin series registradas", best: null, incomplete };
@@ -279,7 +316,8 @@ export function nextSet(sets: DraftSet[]): DraftSet {
   const last = sets.at(-1);
   // Si la última es por bloques, se repite su secuencia (pesos y ciclos incluidos).
   if (last?.blocks) return { key: newKey(), reps: "", weight: "", blocks: cloneBlocks(last.blocks) };
-  return { key: newKey(), reps: last?.reps ?? "", weight: last?.weight ?? "", ...(last?.bar ? { bar: true } : {}) };
+  const load = last ? loadOf(last) : undefined;
+  return { key: newKey(), reps: last?.reps ?? "", weight: last?.weight ?? "", ...(load ? { load } : {}) };
 }
 
 // --- Persistencia local (localStorage) -------------------------------------

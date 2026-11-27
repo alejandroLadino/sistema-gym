@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { IconChevronDown, IconPlus, IconTrash } from "@/components/icons";
 import { formatSequence, formatStep, MAX_BLOCKS } from "@/lib/blocks";
-import { newKey, parseBlocks, type DraftBlock, type DraftBlocks } from "@/lib/session-draft";
+import { loadOf, newKey, parseBlocks, type DraftBlock, type DraftBlocks } from "@/lib/session-draft";
+import { BarWeightField, LoadPicker } from "./LoadPicker";
 import { parseReps, parseWeight } from "@/lib/validation";
 import { useVisualViewport } from "@/lib/use-visual-viewport";
 
@@ -30,7 +31,8 @@ function stepLabel(b: DraftBlock): string {
   const raw = b.value.trim();
   const weight = parseWeight(b.weight);
   const w = weight.ok ? weight.value : null;
-  const bar = b.bar ? { bar_only: true } : {};
+  const mode = loadOf(b);
+  const bar = mode === "bar" ? { bar_only: true } : {};
   if (b.type === "hold") {
     const secs = /^\d{1,4}$/.test(raw) ? Number(raw) : null;
     return secs ? formatStep({ type: "hold", seconds: secs, weight_kg: w, ...bar }) : "Sostener · faltan los segundos";
@@ -87,7 +89,8 @@ export function BlockSetSheet({ exerciseName, initial, initialCount, title, noti
   function add(type: "reps" | "hold") {
     // Un paso nuevo parte del último del mismo tipo (valor y peso), editable.
     const last = [...items].reverse().find((b) => b.type === type);
-    const step: DraftBlock = { key: newKey(), type, value: last?.value ?? "", weight: last?.weight ?? "", ...(last?.bar ? { bar: true } : {}) };
+    const load = last ? loadOf(last) : undefined;
+    const step: DraftBlock = { key: newKey(), type, value: last?.value ?? "", weight: last?.weight ?? "", ...(load ? { load } : {}) };
     setItems((xs) => [...xs, step]);
     focusKey.current = step.key;
     setOpenKey(step.key);
@@ -156,54 +159,65 @@ export function BlockSetSheet({ exerciseName, initial, initialCount, title, noti
                     </button>
                     {open ? (
                       <div id={`paso-${b.key}`} className="step-edit">
-                        <label className="field">
-                          <span>{b.type === "reps" ? "Reps" : "Segundos"}</span>
-                          <input
-                            id={`paso-valor-${b.key}`}
-                            className="input"
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            autoComplete="off"
-                            enterKeyHint="next"
-                            aria-label={b.type === "reps" ? `Repeticiones del paso ${num}` : `Segundos del paso ${num}`}
-                            aria-invalid={err ? true : undefined}
-                            value={b.value}
-                            onChange={(e) => update(b.key, { value: e.target.value })}
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Peso (kg)</span>
-                          <input
-                            className="input"
-                            inputMode="decimal"
-                            autoComplete="off"
-                            enterKeyHint="done"
-                            placeholder={b.bar ? "barra" : "opcional"}
-                            aria-label={`Peso del paso ${num} (kg, opcional)`}
-                            aria-invalid={err ? true : undefined}
+                        <LoadPicker
+                          value={loadOf(b)}
+                          label={`Carga del paso ${num}`}
+                          // Al pasar a barra o peso corporal, el peso anterior (de discos) no es el de la barra.
+                          onChange={(m) =>
+                            update(b.key, { load: m, bar: undefined, ...(m !== "weight" && m !== loadOf(b) ? { weight: "" } : {}) })
+                          }
+                        />
+                        {/* Reps o segundos según el paso; peso solo «Con peso» (o registros sin modo). */}
+                        <div className="step-fields" data-cols={loadOf(b) === "bar" || loadOf(b) === "body" ? 1 : 2}>
+                          <label className="field">
+                            <span>{b.type === "reps" ? "Reps" : "Segundos"}</span>
+                            <input
+                              id={`paso-valor-${b.key}`}
+                              className="input"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              autoComplete="off"
+                              enterKeyHint="next"
+                              aria-label={b.type === "reps" ? `Repeticiones del paso ${num}` : `Segundos del paso ${num}`}
+                              aria-invalid={err ? true : undefined}
+                              value={b.value}
+                              onChange={(e) => update(b.key, { value: e.target.value })}
+                            />
+                          </label>
+                          {loadOf(b) === "bar" || loadOf(b) === "body" ? null : (
+                            <label className="field">
+                              <span>Peso (kg)</span>
+                              <input
+                                className="input"
+                                inputMode="decimal"
+                                autoComplete="off"
+                                enterKeyHint="done"
+                                placeholder="—"
+                                aria-label={`Peso del paso ${num} (kg)`}
+                                aria-invalid={err ? true : undefined}
+                                value={b.weight}
+                                onChange={(e) => update(b.key, { weight: e.target.value })}
+                              />
+                            </label>
+                          )}
+                        </div>
+                        {loadOf(b) === "bar" ? (
+                          <BarWeightField
                             value={b.weight}
-                            onChange={(e) => update(b.key, { weight: e.target.value })}
+                            onChange={(v) => update(b.key, { weight: v })}
+                            label={`Peso de la barra del paso ${num} (kg, opcional)`}
                           />
-                          <button
-                            type="button"
-                            className="bar-toggle"
-                            aria-pressed={Boolean(b.bar)}
-                            aria-label={`Solo barra en el paso ${num}`}
-                            onClick={() => update(b.key, { bar: !b.bar })}
-                          >
-                            Solo barra
-                          </button>
-                        </label>
+                        ) : null}
                         <button
                           type="button"
-                          className="btn btn-ghost btn-icon"
+                          className="btn btn-ghost btn-sm step-remove"
                           aria-label={`Quitar paso ${num}`}
                           onClick={() => {
                             setItems((xs) => xs.filter((x) => x.key !== b.key));
                             setOpenKey(null);
                           }}
                         >
-                          <IconTrash />
+                          <IconTrash /> Quitar paso
                         </button>
                       </div>
                     ) : null}

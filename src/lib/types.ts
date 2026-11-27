@@ -36,6 +36,8 @@ export type SetValue = {
   blocks?: Block[] | null;
   /** «Solo barra» (series simples): distingue la barra de peso corporal o de un peso sin capturar. */
   bar_only?: boolean;
+  /** «Peso corporal» elegido explícitamente (un peso vacío sin marca es un registro sin indicar). */
+  bodyweight?: boolean;
 };
 
 export type SessionData = {
