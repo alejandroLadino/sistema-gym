@@ -1,3 +1,5 @@
+import type { Block, BlockPlan } from "./blocks";
+
 export type Role = "admin" | "user";
 
 export type Profile = {
@@ -23,7 +25,11 @@ export type Exercise = {
   archived_at: string | null;
 };
 
-export type SetValue = { reps: number; weight_kg: number | null };
+/**
+ * Serie simple (reps y peso opcional) o por bloques (`blocks` + `rounds`; entonces
+ * `reps` y `weight_kg` son null).
+ */
+export type SetValue = { reps: number | null; weight_kg: number | null; rounds?: number | null; blocks?: Block[] | null };
 
 export type SessionData = {
   id: string;
@@ -41,6 +47,7 @@ export type SessionData = {
     target_sets?: number | null;
     target_reps_min?: number | null;
     target_reps_max?: number | null;
+    target_blocks?: BlockPlan | null;
     sets: SetValue[];
   }[];
 };

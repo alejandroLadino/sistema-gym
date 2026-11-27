@@ -1,5 +1,9 @@
+import { setBest, setHoldSeconds, setTotalReps } from "./blocks";
 import { formatKg, isIsoDate } from "./format";
 import type { SetValue } from "./types";
+
+/** Mejor serie comparable: reps y peso del mismo bloque (o de la serie simple). */
+export type BestSet = { reps: number; weight_kg: number | null };
 
 /** Fila de `get_exercise_progress`: una por sesión con sus series del ejercicio. */
 export type ProgressRow = {
@@ -15,9 +19,13 @@ export type SessionStat = {
   createdAt: string;
   sets: SetValue[];
   /** Mejor serie: mayor peso (empate → más reps); sin peso, la de más reps. */
-  best: SetValue;
+  best: BestSet;
   maxWeight: number | null;
+  /** Reps totales (en series por bloques: ciclos × reps de los bloques). */
   totalReps: number;
+  /** Segundos de sostén (series por bloques), aparte de las reps. */
+  holdSeconds: number;
+  /** Cada serie por bloques cuenta como una serie. */
   setCount: number;
   /** Posición entre las sesiones del mismo día (1, 2…) y cuántas hubo. */
   dayIndex: number;
@@ -26,10 +34,15 @@ export type SessionStat = {
 
 const weightOf = (s: SetValue) => (s.weight_kg === null || s.weight_kg === undefined ? null : Number(s.weight_kg));
 
-/** Mayor peso y, si hay empate, más repeticiones. Las series sin peso van después. */
-export function bestSet(sets: SetValue[]): SetValue {
-  let best = sets[0];
-  for (const s of sets.slice(1)) {
+/**
+ * Mayor peso y, si hay empate, más repeticiones. Las series sin peso van después.
+ * En una serie por bloques cuenta su mejor bloque de repeticiones (con sus reps).
+ */
+export function bestSet(sets: SetValue[]): BestSet {
+  const candidates = sets.map(setBest).filter((b): b is BestSet => b !== null);
+  if (candidates.length === 0) return { reps: 0, weight_kg: null };
+  let best = candidates[0];
+  for (const s of candidates.slice(1)) {
     const wb = weightOf(best);
     const ws = weightOf(s);
     if (ws !== null && (wb === null || ws > wb || (ws === wb && s.reps > best.reps))) best = s;
@@ -47,17 +60,23 @@ export function sessionStats(rows: ProgressRow[]): SessionStat[] {
   for (const r of sorted) perDay.set(r.session_date, (perDay.get(r.session_date) ?? 0) + 1);
   const seen = new Map<string, number>();
   return sorted.map((r) => {
-    const weights = r.sets.map(weightOf).filter((w): w is number => w !== null);
+    const weights = r.sets
+      .map((x) => setBest(x))
+      .map((b) => (b ? weightOf(b) : null))
+      .filter((w): w is number => w !== null);
     const dayIndex = (seen.get(r.session_date) ?? 0) + 1;
     seen.set(r.session_date, dayIndex);
     return {
       id: r.session_id,
       date: r.session_date,
       createdAt: r.created_at,
-      sets: r.sets.map((s) => ({ reps: s.reps, weight_kg: weightOf(s) })),
+      sets: r.sets.map((s) =>
+        s.blocks?.length ? { reps: null, weight_kg: null, rounds: s.rounds ?? 1, blocks: s.blocks } : { reps: s.reps, weight_kg: weightOf(s) },
+      ),
       best: bestSet(r.sets),
       maxWeight: weights.length ? Math.max(...weights) : null,
-      totalReps: r.sets.reduce((sum, s) => sum + s.reps, 0),
+      totalReps: r.sets.reduce((sum, s) => sum + setTotalReps(s), 0),
+      holdSeconds: r.sets.reduce((sum, s) => sum + setHoldSeconds(s), 0),
       setCount: r.sets.length,
       dayIndex,
       dayCount: perDay.get(r.session_date) ?? 1,
@@ -75,7 +94,7 @@ export function comparableSessions(stats: SessionStat[], weighted: boolean): Ses
   return weighted ? stats.filter((s) => s.maxWeight !== null) : stats;
 }
 
-export function formatBestSet(set: SetValue, weighted: boolean): string {
+export function formatBestSet(set: BestSet, weighted: boolean): string {
   const w = weightOf(set);
   if (weighted && w !== null) return `${formatKg(w)} kg × ${set.reps}`;
   return `${set.reps} reps`;
@@ -85,8 +104,8 @@ export type Trend = "up" | "down" | "same" | "first";
 
 /** «+5 kg vs. sesión anterior», «Sin cambio en peso máximo», «Primer registro»… */
 export function compareBest(
-  latest: SetValue,
-  previous: SetValue | null | undefined,
+  latest: BestSet,
+  previous: BestSet | null | undefined,
   weighted: boolean,
 ): { text: string; trend: Trend } {
   if (!previous) return { text: "Primer registro", trend: "first" };
@@ -189,11 +208,15 @@ export function chartPoints(stats: SessionStat[], metric: Metric): MetricPoint[]
     const day = s.dayCount > 1 ? ` · sesión ${s.dayIndex} de ${s.dayCount} del día` : "";
     if (metric === "peso") {
       if (s.maxWeight === null) continue;
-      const n = s.sets.filter((x) => weightOf(x) === s.maxWeight).length;
+      const n = s.sets.filter((x) => {
+        const b = setBest(x);
+        return b !== null && weightOf(b) === s.maxWeight;
+      }).length;
       points.push({ id: s.id, date: s.date, value: s.maxWeight, label: `${plural(n, "serie", "series")} con ${formatKg(s.maxWeight)} kg${day}` });
     } else if (metric === "mejor_serie") {
-      const max = Math.max(...s.sets.map((x) => x.reps));
-      const n = s.sets.filter((x) => x.reps === max).length;
+      const reps = s.sets.map((x) => setBest(x)?.reps ?? 0);
+      const max = Math.max(...reps);
+      const n = reps.filter((r) => r === max).length;
       points.push({ id: s.id, date: s.date, value: max, label: `${plural(n, "serie", "series")} con ${max} reps${day}` });
     } else {
       points.push({ id: s.id, date: s.date, value: s.totalReps, label: `${plural(s.setCount, "serie", "series")}${day}` });
@@ -221,7 +244,8 @@ export type OverviewRow = {
   session_count: number;
   last_session_date: string;
   last_session_id: string;
-  recent: { session_id: string; session_date: string; best_set: SetValue; total_reps: number; set_count: number }[];
+  /** best_set es null si la sesión solo tiene sostenes. */
+  recent: { session_id: string; session_date: string; best_set: BestSet | null; total_reps: number; set_count: number }[];
 };
 
 export type OverviewSummary = {
@@ -236,8 +260,8 @@ export function overviewSummary(row: OverviewRow): OverviewSummary {
   return {
     lastDate: row.last_session_date,
     sessionCount: row.session_count,
-    best: latest ? formatBestSet(latest.best_set, row.uses_weight) : "Sin peso registrado",
-    change: latest
+    best: latest?.best_set ? formatBestSet(latest.best_set, row.uses_weight) : "Sin peso registrado",
+    change: latest?.best_set
       ? compareBest(latest.best_set, previous?.best_set, row.uses_weight)
       : { text: "Sin peso registrado", trend: "first" },
   };

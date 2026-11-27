@@ -1,5 +1,7 @@
+import { formatPlan, type BlockPlan } from "./blocks";
+import { parseBlocks } from "./session-draft";
 /** Meta opcional de un ejercicio: series y repeticiones (cantidad o rango). */
-export type Target = { sets: number | null; repsMin: number | null; repsMax: number | null };
+export type Target = { sets: number | null; repsMin: number | null; repsMax: number | null; blocks?: BlockPlan | null };
 
 /** Ejercicio de una rutina tal como lo devuelve `get_routines`. */
 export type RoutineExerciseRow = {
@@ -10,6 +12,8 @@ export type RoutineExerciseRow = {
   target_sets: number | null;
   target_reps_min: number | null;
   target_reps_max: number | null;
+  /** Secuencia planificada (series por bloques), sin pesos. */
+  target_blocks?: BlockPlan | null;
 };
 
 export type Routine = {
@@ -24,8 +28,17 @@ export type Routine = {
 export type RoutinePayload = {
   id: string;
   name: string;
-  exercises: { exercise_id: string; target_sets: number | null; target_reps_min: number | null; target_reps_max: number | null }[];
+  exercises: {
+    exercise_id: string;
+    target_sets: number | null;
+    target_reps_min: number | null;
+    target_reps_max: number | null;
+    target_blocks: BlockPlan | null;
+  }[];
 };
+
+/** Secuencia planificada editable (sin pesos). */
+export type RoutineDraftPlan = { rounds: string; items: { key: string; type: "reps" | "hold"; value: string }[] };
 
 export const MAX_ROUTINE_NAME = 80;
 export const MAX_ROUTINE_EXERCISES = 50;
@@ -41,9 +54,31 @@ export type RoutineDraftExercise = {
   sets: string;
   repsMin: string;
   repsMax: string;
+  /** Meta por bloques: si existe, reemplaza a las repeticiones. */
+  plan?: RoutineDraftPlan | null;
 };
 
-export type TargetErrors = Partial<Record<"sets" | "reps", string>>;
+export type TargetErrors = Partial<Record<"sets" | "reps" | "plan", string>>;
+
+/** Valida la secuencia planificada (mismas reglas que una serie por bloques, sin pesos). */
+export function parsePlan(plan: RoutineDraftPlan): { ok: true; plan: BlockPlan } | { ok: false; error: string } {
+  const res = parseBlocks({ rounds: plan.rounds, items: plan.items.map((b) => ({ ...b, weight: "" })) });
+  if (!res.ok) return { ok: false, error: res.error };
+  return {
+    ok: true,
+    plan: {
+      rounds: res.set.rounds ?? 1,
+      items: res.set.blocks!.map((b) => (b.type === "reps" ? { type: "reps", reps: b.reps } : { type: "hold", seconds: b.seconds })),
+    },
+  };
+}
+
+export function planToDraft(plan: BlockPlan, newKey: () => string): RoutineDraftPlan {
+  return {
+    rounds: String(plan.rounds),
+    items: plan.items.map((b) => ({ key: newKey(), type: b.type, value: String(b.type === "reps" ? b.reps : b.seconds) })),
+  };
+}
 
 function parsePositive(raw: string, max: number): number | null | "invalid" {
   const value = raw.trim();
@@ -74,10 +109,14 @@ export function parseTarget(input: { sets: string; repsMin: string; repsMax: str
   return { ok: true, target: { sets: sets as number | null, repsMin, repsMax } };
 }
 
-/** «3 × 8–12», «3 × 10», «3 series», «8–12 reps»; null sin meta. */
+/** «3 × 8–12», «3 × 10», «3 series», «8–12 reps», «4 × (7 reps → sostener 7 s) × 3»; null sin meta. */
 export function formatTarget(t: Partial<Target> | null | undefined): string | null {
   if (!t) return null;
   const sets = t.sets ?? null;
+  if (t.blocks) {
+    const plan = formatPlan(t.blocks);
+    return sets !== null ? `${sets} ${sets === 1 ? "serie" : "series"}: ${plan}` : plan;
+  }
   const min = t.repsMin ?? null;
   const max = t.repsMax ?? min;
   const reps = min === null ? null : max !== null && max !== min ? `${min}–${max}` : `${min}`;
@@ -87,8 +126,13 @@ export function formatTarget(t: Partial<Target> | null | undefined): string | nu
   return null;
 }
 
-export function targetOfRow(r: { target_sets: number | null; target_reps_min: number | null; target_reps_max: number | null }): Target {
-  return { sets: r.target_sets, repsMin: r.target_reps_min, repsMax: r.target_reps_max };
+export function targetOfRow(r: {
+  target_sets: number | null;
+  target_reps_min: number | null;
+  target_reps_max: number | null;
+  target_blocks?: BlockPlan | null;
+}): Target {
+  return { sets: r.target_sets, repsMin: r.target_reps_min, repsMax: r.target_reps_max, blocks: r.target_blocks ?? null };
 }
 
 /** Valida el formulario completo y lo convierte en lo que espera `save_routine`. */
@@ -111,14 +155,18 @@ export function routineToPayload(
 
   const rows: RoutinePayload["exercises"] = [];
   for (const ex of exercises) {
-    const parsed = parseTarget(ex);
-    if (!parsed.ok) targets[ex.key] = parsed.errors;
-    else
+    // Con secuencia por bloques, las repeticiones sueltas no aplican.
+    const parsed = parseTarget(ex.plan ? { ...ex, repsMin: "", repsMax: "" } : ex);
+    const plan = ex.plan ? parsePlan(ex.plan) : null;
+    if (!parsed.ok || (plan && !plan.ok)) {
+      targets[ex.key] = { ...(parsed.ok ? {} : parsed.errors), ...(plan && !plan.ok ? { plan: plan.error } : {}) };
+    } else
       rows.push({
         exercise_id: ex.exerciseId,
         target_sets: parsed.target.sets,
         target_reps_min: parsed.target.repsMin,
         target_reps_max: parsed.target.repsMax,
+        target_blocks: plan && plan.ok ? plan.plan : null,
       });
   }
   if (nameError || general || Object.keys(targets).length) return { ok: false, name: nameError, general, targets };

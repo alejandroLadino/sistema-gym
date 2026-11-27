@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { EXERCISE_COLUMNS, getMuscleGroups } from "@/lib/muscle-groups";
-import type { Routine } from "@/lib/routines";
+import { planToDraft, type Routine } from "@/lib/routines";
+import { newKey } from "@/lib/session-draft";
 import { createClient } from "@/lib/supabase/server";
 import type { Exercise } from "@/lib/types";
 import { isUuid } from "@/lib/validation";
@@ -38,6 +39,7 @@ export default async function EditRoutinePage({ params }: PageProps<"/rutinas/[i
         repsMin: show(e.target_reps_min),
         // Una cantidad exacta (mín = máx) se muestra solo en «mín».
         repsMax: e.target_reps_max !== null && e.target_reps_max !== e.target_reps_min ? show(e.target_reps_max) : "",
+        plan: e.target_blocks ? planToDraft(e.target_blocks, newKey) : null,
       }))}
       exercises={(exercises ?? []) as Exercise[]}
       muscleGroups={groups}

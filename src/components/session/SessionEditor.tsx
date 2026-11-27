@@ -5,12 +5,17 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deleteSession, finishSession, getPreviousSets, saveSession } from "@/app/actions/sessions";
 import { ActionsMenu } from "@/components/ActionsMenu";
-import { IconCalendar, IconChevronDown, IconCopy, IconList, IconPlus, IconTrash } from "@/components/icons";
+import { IconCalendar, IconChevronDown, IconCopy, IconList, IconPencil, IconPlus, IconTrash } from "@/components/icons";
+import { formatBlock, formatSequence, isBlockSet, sameShape, type BlockPlan } from "@/lib/blocks";
 import { formatDate, summarizeSets, todayLocal } from "@/lib/format";
 import { historyHref } from "@/lib/history-query";
 import { formatTarget } from "@/lib/routines";
 import {
   appendSets,
+  blocksToDraft,
+  cloneBlocks,
+  parseBlocks,
+  type DraftBlocks,
   clearNewPointer,
   exerciseSummary,
   copyPreviousSets,
@@ -34,6 +39,7 @@ import type { Exercise, MuscleGroup, PreviousSets, SessionData } from "@/lib/typ
 import { uuidv4 } from "@/lib/uuid";
 import { ExercisePicker } from "./ExercisePicker";
 import { CardMenu } from "./CardMenu";
+import { BlockSetSheet, emptyBlocks } from "./BlockSetSheet";
 import { QuickAddSets, quickRepsInputId } from "./QuickAddSets";
 
 type Status = "empty" | "dirty" | "invalid" | "saving" | "saved" | "error";
@@ -75,6 +81,16 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
   const [prevError, setPrevError] = useState(false);
   /** Captura rápida abierta en ejercicios que ya tienen series (en los vacíos siempre se muestra). */
   const [quickOpen, setQuickOpen] = useState<Record<string, boolean>>({});
+  /** Panel de serie por bloques: agregar (con cantidad) o editar una serie concreta. */
+  const [blockSheet, setBlockSheet] = useState<{
+    exKey: string;
+    exerciseName: string;
+    setKey: string | null;
+    initial: DraftBlocks;
+    count: number | null;
+    title: string;
+    notice?: string;
+  } | null>(null);
   /** Copia local vacía que contradice la sesión finalizada guardada (se muestra la del servidor). */
   const [localConflict, setLocalConflict] = useState(false);
   /** Diálogo al quitar el único ejercicio de una sesión finalizada. */
@@ -370,6 +386,61 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
   const focusQuickReps = (exKey: string) =>
     requestAnimationFrame(() => document.getElementById(quickRepsInputId(exKey))?.focus());
 
+  /** Secuencia de la última vez con la misma forma (para tomar sus pesos al cargar un plan). */
+  const planWithLastWeights = (plan: BlockPlan, prev: PreviousSets | null | undefined): DraftBlocks => {
+    const match = prev?.sets.filter(isBlockSet).find((st) => sameShape(st.blocks!, plan.items));
+    const draft = blocksToDraft(plan.items, plan.rounds);
+    if (match) draft.items = draft.items.map((b, i) => ({ ...b, weight: blocksToDraft(match.blocks!, 1).items[i].weight }));
+    return draft;
+  };
+
+  /** «Agregar serie por bloques»: parte de la última secuencia del ejercicio, la de la última vez o el plan. */
+  const openBlocks = (ex: DraftExercise) => {
+    const prev = prevForDate?.[ex.exerciseId];
+    const lastHere = [...ex.sets].reverse().find((st) => st.blocks);
+    const lastPrev = prev?.sets.filter(isBlockSet).at(-1);
+    const initial = lastHere?.blocks
+      ? cloneBlocks(lastHere.blocks)
+      : lastPrev
+        ? blocksToDraft(lastPrev.blocks!, lastPrev.rounds ?? 1)
+        : ex.target?.blocks
+          ? planWithLastWeights(ex.target.blocks, prev)
+          : emptyBlocks();
+    setBlockSheet({ exKey: ex.key, exerciseName: ex.name, setKey: null, initial, count: 1, title: "Serie por bloques" });
+  };
+
+  /** Carga la secuencia planificada por la rutina para registrar lo que realmente se hizo. */
+  const loadPlan = (ex: DraftExercise, plan: BlockPlan) => {
+    setBlockSheet({
+      exKey: ex.key,
+      exerciseName: ex.name,
+      setKey: null,
+      initial: planWithLastWeights(plan, prevForDate?.[ex.exerciseId]),
+      count: ex.target?.sets ?? 1,
+      title: "Secuencia planificada",
+      notice: "Ajusta reps, segundos y pesos a lo que realmente hiciste. Solo cuentan las series que agregues.",
+    });
+  };
+
+  const editBlockSet = (ex: DraftExercise, set: DraftSet, n: number) => {
+    if (!set.blocks) return;
+    setBlockSheet({ exKey: ex.key, exerciseName: ex.name, setKey: set.key, initial: cloneBlocks(set.blocks), count: null, title: `Editar serie ${n}` });
+  };
+
+  const submitBlocks = (blocks: DraftBlocks, count: number) => {
+    const sheet = blockSheet;
+    if (!sheet) return;
+    setBlockSheet(null);
+    if (sheet.setKey) {
+      // Solo cambia esa serie; las demás quedan igual.
+      updateExercise(sheet.exKey, (e) => ({ ...e, sets: e.sets.map((st) => (st.key === sheet.setKey ? { ...st, blocks } : st)) }));
+      return;
+    }
+    const added = Array.from({ length: count }, () => ({ key: newKey(), reps: "", weight: "", blocks: cloneBlocks(blocks) }));
+    updateExercise(sheet.exKey, (e) => ({ ...e, sets: appendSets(e.sets, added) }));
+    setQuickOpen((q) => ({ ...q, [sheet.exKey]: false }));
+  };
+
   const addQuickSets = (ex: DraftExercise, sets: DraftSet[]) => {
     updateExercise(ex.key, (e) => ({ ...e, sets: appendSets(e.sets, sets) }));
     setQuickOpen((q) => ({ ...q, [ex.key]: false }));
@@ -615,6 +686,17 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
 
               {!isCollapsed ? (
                 <div id={bodyId}>
+                  {ex.target?.blocks ? (
+                    <div className="plan-box">
+                      <p style={{ margin: 0 }}>
+                        <span className="muted small">Secuencia planificada · </span>
+                        {formatTarget(ex.target)}
+                      </p>
+                      <button type="button" className="btn btn-sm" onClick={() => loadPlan(ex, ex.target!.blocks!)}>
+                        Cargar secuencia planificada
+                      </button>
+                    </div>
+                  ) : null}
                   <PreviousSummary
                     prev={prev}
                     loadError={prevError}
@@ -625,13 +707,26 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
 
                   {ex.sets.length ? (
                     <div className="set-table" role="group" aria-label={`Series de ${ex.name}`}>
-                      <div className="set-row set-head" aria-hidden="true">
-                        <span>Serie</span>
-                        <span>Peso (kg)</span>
-                        <span>Reps</span>
-                        <span />
-                      </div>
-                      {ex.sets.map((set, i) => (
+                      {ex.sets.some((st) => !st.blocks) ? (
+                        <div className="set-row set-head" aria-hidden="true">
+                          <span>Serie</span>
+                          <span>Peso (kg)</span>
+                          <span>Reps</span>
+                          <span />
+                        </div>
+                      ) : null}
+                      {ex.sets.map((set, i) =>
+                        set.blocks ? (
+                          <BlockSetRow
+                            key={set.key}
+                            n={i + 1}
+                            exerciseName={ex.name}
+                            blocks={set.blocks}
+                            error={setErrors[set.key]}
+                            onEdit={() => editBlockSet(ex, set, i + 1)}
+                            onRemove={() => updateExercise(ex.key, (e) => ({ ...e, sets: e.sets.filter((s) => s.key !== set.key) }))}
+                          />
+                        ) : (
                         <div key={set.key}>
                           <div className="set-row">
                             <span className="num">{i + 1}</span>
@@ -669,7 +764,8 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
                           </div>
                           {setErrors[set.key] ? <p className="set-error">Serie {i + 1}: {setErrors[set.key]}</p> : null}
                         </div>
-                      ))}
+                        ),
+                      )}
                     </div>
                   ) : null}
 
@@ -694,6 +790,9 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
                       </button>
                     ) : null}
                   </div>
+                  <button type="button" className="btn btn-ghost btn-block block-add" onClick={() => openBlocks(ex)}>
+                    <IconPlus /> Agregar serie por bloques
+                  </button>
                 </div>
               ) : null}
             </section>
@@ -767,6 +866,19 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
         </div>
       ) : null}
 
+      {blockSheet ? (
+        <BlockSetSheet
+          key={`${blockSheet.exKey}-${blockSheet.setKey ?? "nueva"}`}
+          exerciseName={blockSheet.exerciseName}
+          initial={blockSheet.initial}
+          initialCount={blockSheet.count}
+          title={blockSheet.title}
+          notice={blockSheet.notice}
+          onSubmit={submitBlocks}
+          onClose={() => setBlockSheet(null)}
+        />
+      ) : null}
+
       {pickerOpen ? (
         <ExercisePicker
           exercises={catalog}
@@ -826,4 +938,58 @@ function replaceNotice(ex: DraftExercise): string {
   const n = exerciseSummary(ex.sets).count;
   const series = n === 0 ? "" : ` y sus ${n} ${n === 1 ? "serie registrada" : "series registradas"}`;
   return `Elige el ejercicio que ocupará el lugar de «${ex.name}». Se quitará «${ex.name}»${series} de esta sesión; seguirá en tu catálogo y en tus otras sesiones.`;
+}
+
+/** Fila de una serie por bloques: resumen compacto que se expande para ver la secuencia. */
+function BlockSetRow({
+  n,
+  exerciseName,
+  blocks,
+  error,
+  onEdit,
+  onRemove,
+}: {
+  n: number;
+  exerciseName: string;
+  blocks: DraftBlocks;
+  error?: string;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  const parsed = parseBlocks(blocks);
+  const set = parsed.ok ? parsed.set : null;
+  return (
+    <div>
+      <div className="set-row set-row-blocks">
+        <span className="num">{n}</span>
+        <details className="block-set">
+          <summary aria-label={`Serie ${n} de ${exerciseName}: ${set ? formatSequence(set.blocks!, set.rounds ?? 1) : "datos incompletos"}`}>
+            <span className="block-set-text">{set ? formatSequence(set.blocks!, set.rounds ?? 1) : "Serie por bloques con datos incompletos"}</span>
+          </summary>
+          {set ? (
+            <ol className="block-set-list">
+              {set.blocks!.map((b, i) => (
+                <li key={i}>
+                  <span className="muted">Bloque {i + 1}:</span> {formatBlock(b)}
+                </li>
+              ))}
+              <li className="muted">Repetir secuencia: {set.rounds === 1 ? "1 vez" : `${set.rounds} veces`}</li>
+            </ol>
+          ) : null}
+          <div className="block-set-actions">
+            <button type="button" className="btn btn-sm" onClick={onEdit}>
+              <IconPencil /> Editar
+            </button>
+            <button type="button" className="btn btn-sm btn-ghost" aria-label={`Quitar serie ${n} de ${exerciseName}`} onClick={onRemove}>
+              <IconTrash /> Quitar
+            </button>
+          </div>
+        </details>
+        <button type="button" className="btn btn-ghost btn-icon" aria-label={`Editar serie ${n} de ${exerciseName}`} onClick={onEdit}>
+          <IconPencil />
+        </button>
+      </div>
+      {error ? <p className="set-error">Serie {n}: {error}</p> : null}
+    </div>
+  );
 }

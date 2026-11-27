@@ -53,12 +53,42 @@ describe("formulario de rutina", () => {
         id: "r",
         name: "Pecho y tríceps",
         exercises: [
-          { exercise_id: "e2", target_sets: 3, target_reps_min: 8, target_reps_max: 12 },
-          { exercise_id: "e1", target_sets: null, target_reps_min: null, target_reps_max: null },
+          { exercise_id: "e2", target_sets: 3, target_reps_min: 8, target_reps_max: 12, target_blocks: null },
+          { exercise_id: "e1", target_sets: null, target_reps_min: null, target_reps_max: null, target_blocks: null },
         ],
       },
     });
   });
+  it("meta por bloques: secuencia sin pesos, ciclos y series; reemplaza las repeticiones", () => {
+    const plan = {
+      rounds: "3",
+      items: [
+        { key: "p1", type: "reps" as const, value: "7" },
+        { key: "p2", type: "hold" as const, value: "7" },
+      ],
+    };
+    expect(routineToPayload("r", "Hombro", [{ ...row("a", "e1", { sets: "4", repsMin: "12" }), plan }])).toEqual({
+      ok: true,
+      payload: {
+        id: "r",
+        name: "Hombro",
+        exercises: [
+          {
+            exercise_id: "e1",
+            target_sets: 4,
+            target_reps_min: null,
+            target_reps_max: null,
+            target_blocks: { rounds: 3, items: [{ type: "reps", reps: 7 }, { type: "hold", seconds: 7 }] },
+          },
+        ],
+      },
+    });
+    expect(routineToPayload("r", "Hombro", [{ ...row("a", "e1"), plan: { ...plan, rounds: "0" } }])).toMatchObject({
+      ok: false,
+      targets: { a: { plan: expect.stringMatching(/Repetir secuencia/) } },
+    });
+  });
+
   it("reordena y detecta archivados", () => {
     expect(move([1, 2, 3], 0, 1)).toEqual([2, 1, 3]);
     expect(move([1, 2, 3], 0, -1)).toEqual([1, 2, 3]);

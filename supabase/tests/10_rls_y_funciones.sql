@@ -617,6 +617,108 @@ end $$;
 reset role;
 \echo '   Tu constancia (días distintos, válidas, fecha, series, eliminación, aislamiento): OK'
 
+-- Series por bloques ----------------------------------------------------------------------
+-- Smith inclinado: 7 a 40 → 7 a 35 → 7 a 30 kg, 1 vez por serie, 4 series.
+-- Elevaciones laterales: (7 reps → sostener 7 s) × 3 por serie, 4 series.
+select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+insert into public.exercises (id, name, muscle_group_id) values
+  ('e0000000-0000-0000-0000-00000000000d', 'Smith inclinado', 'pecho'),
+  ('e0000000-0000-0000-0000-00000000000e', 'Elevaciones laterales', 'hombros');
+do $$
+declare
+  smith jsonb := '{"rounds": 1, "blocks": [{"type": "reps", "reps": 7, "weight_kg": 40}, {"type": "reps", "reps": 7, "weight_kg": 35}, {"type": "reps", "reps": 7, "weight_kg": 30}]}';
+  lat jsonb := '{"rounds": 3, "blocks": [{"type": "reps", "reps": 7, "weight_kg": null}, {"type": "hold", "seconds": 7, "weight_kg": null}]}';
+  r record; j jsonb; ok boolean; bad jsonb;
+begin
+  perform public.save_workout_session(jsonb_build_object('id', '50000000-0000-0000-0000-000000000013', 'session_date', '2026-11-27',
+    'exercises', jsonb_build_array(
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-00000000000d', 'sets', jsonb_build_array(smith, smith, smith, smith)),
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-00000000000e', 'sets', jsonb_build_array(lat, lat, lat, lat)))));
+
+  -- Smith: 4 series, 84 reps, máximo 40 kg × 7.
+  select * into r from public.get_exercise_progress('e0000000-0000-0000-0000-00000000000d', null, null);
+  assert jsonb_array_length(r.sets) = 4 and r.total_reps = 84 and r.max_weight_kg = 40 and r.max_reps = 7,
+    format('Smith inclinado: %s', row_to_json(r));
+  assert r.sets -> 0 = smith || '{"reps": null, "weight_kg": null}'::jsonb, format('JSON de la serie: %s', r.sets -> 0);
+  select recent -> 0 into j from public.get_progress_overview() where exercise_id = 'e0000000-0000-0000-0000-00000000000d';
+  assert j -> 'best_set' = '{"reps": 7, "weight_kg": 40}'::jsonb and (j ->> 'total_reps')::int = 84 and (j ->> 'set_count')::int = 4,
+    format('Resumen de Smith: %s', j);
+
+  -- Laterales: 4 series, 84 reps y 84 s de sostén.
+  select * into r from public.get_exercise_progress('e0000000-0000-0000-0000-00000000000e', null, null);
+  assert jsonb_array_length(r.sets) = 4 and r.total_reps = 84 and r.max_weight_kg is null, format('Laterales: %s', row_to_json(r));
+  assert (select sum(private.set_hold_seconds(es.rounds, es.blocks)) from public.exercise_sets es
+          join public.session_exercises se on se.id = es.session_exercise_id
+          where se.session_id = '50000000-0000-0000-0000-000000000013' and se.exercise_id = 'e0000000-0000-0000-0000-00000000000e') = 84,
+    '84 s de sostén';
+  -- Contadores de Historial: cada serie por bloques es una serie.
+  assert (select set_count from public.search_workout_sessions(p_query => 'smith')) = 8, 'Historial cuenta 8 series';
+
+  -- «Última vez» conserva bloques, orden y ciclos.
+  select * into r from public.get_previous_exercise_sets(array['e0000000-0000-0000-0000-00000000000e']::uuid[], '2026-11-28', null);
+  assert r.sets -> 0 -> 'blocks' = lat -> 'blocks' and (r.sets -> 0 ->> 'rounds')::int = 3, format('Última vez: %s', r.sets -> 0);
+
+  -- Corregir un solo bloque deja el resto igual.
+  perform public.save_workout_session(jsonb_build_object('id', '50000000-0000-0000-0000-000000000013', 'session_date', '2026-11-27',
+    'exercises', jsonb_build_array(
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-00000000000d', 'sets', jsonb_build_array(smith,
+        jsonb_set(smith, '{blocks,1,weight_kg}', '37.5'), smith, smith)),
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-00000000000e', 'sets', jsonb_build_array(lat, lat, lat, lat)))));
+  j := public.get_workout_session('50000000-0000-0000-0000-000000000013') -> 'exercises' -> 0 -> 'sets';
+  assert (j -> 1 -> 'blocks' -> 1 ->> 'weight_kg')::numeric = 37.5 and j -> 1 -> 'blocks' -> 0 = smith -> 'blocks' -> 0
+         and j -> 0 = j -> 2, format('Corrección de un bloque: %s', j);
+
+  -- Validación: secuencia vacía, tipo desconocido, reps 0, sostén con reps, 3 decimales, ciclos 0.
+  foreach bad in array array[
+    '{"rounds": 1, "blocks": []}', '{"rounds": 1, "blocks": [{"type": "jump", "reps": 7}]}',
+    '{"rounds": 1, "blocks": [{"type": "reps", "reps": 0}]}', '{"rounds": 1, "blocks": [{"type": "hold", "seconds": 7, "reps": 3}]}',
+    '{"rounds": 1, "blocks": [{"type": "reps", "reps": 7, "weight_kg": 40.125}]}', '{"rounds": 0, "blocks": [{"type": "reps", "reps": 7}]}',
+    '{"rounds": 1, "blocks": [{"type": "hold", "seconds": 1.5}]}'
+  ]::jsonb[] loop
+    ok := false;
+    begin
+      perform public.save_workout_session(jsonb_build_object('id', '50000000-0000-0000-0000-000000000014', 'session_date', '2026-11-27',
+        'exercises', jsonb_build_array(jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-00000000000d', 'sets', jsonb_build_array(bad)))));
+    exception when check_violation then ok := true;
+    end;
+    assert ok, format('Serie por bloques inválida aceptada: %s', bad);
+  end loop;
+  assert not exists (select 1 from public.workout_sessions where id = '50000000-0000-0000-0000-000000000014'), 'Sin sesiones a medias';
+
+  -- Compatibilidad: las series simples devuelven el mismo JSON de siempre.
+  assert public.get_workout_session('50000000-0000-0000-0000-000000000002') -> 'exercises' -> 0 -> 'sets' -> 0
+         = '{"reps": 12, "weight_kg": 42.50}'::jsonb, 'Series simples sin cambios';
+
+  -- Rutinas: la secuencia planificada (sin pesos) es la meta y se copia a la sesión.
+  ok := false;
+  begin
+    perform public.save_routine('{"id": "70000000-0000-0000-0000-000000000005", "name": "Con peso en el plan", "exercises": [
+      {"exercise_id": "e0000000-0000-0000-0000-00000000000e", "target_blocks": {"rounds": 3, "items": [{"type": "reps", "reps": 7, "weight_kg": 5}]}}]}'::jsonb);
+  exception when check_violation then ok := true;
+  end;
+  assert ok, 'El plan no guarda pesos';
+  perform public.save_routine('{"id": "70000000-0000-0000-0000-000000000005", "name": "Hombro", "exercises": [
+    {"exercise_id": "e0000000-0000-0000-0000-00000000000e", "target_sets": 4,
+     "target_blocks": {"rounds": 3, "items": [{"type": "reps", "reps": 7}, {"type": "hold", "seconds": 7}]}}]}'::jsonb);
+  assert (select exercises -> 0 -> 'target_blocks' from public.get_routines('70000000-0000-0000-0000-000000000005'))
+         = '{"rounds": 3, "items": [{"type": "reps", "reps": 7}, {"type": "hold", "seconds": 7}]}'::jsonb, 'Plan guardado';
+  perform public.start_routine_session('70000000-0000-0000-0000-000000000005', '50000000-0000-0000-0000-000000000015', '2026-11-28');
+  j := public.get_workout_session('50000000-0000-0000-0000-000000000015') -> 'exercises' -> 0;
+  assert (j -> 'target_blocks' ->> 'rounds')::int = 3 and (j ->> 'target_sets')::int = 4 and j -> 'sets' = '[]'::jsonb,
+    format('El plan se copia y no cuenta como series: %s', j);
+  -- Registrar los resultados reales conserva el plan.
+  perform public.save_workout_session(jsonb_build_object('id', '50000000-0000-0000-0000-000000000015', 'session_date', '2026-11-28',
+    'exercises', jsonb_build_array(jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-00000000000e', 'sets', jsonb_build_array(lat)))));
+  j := public.get_workout_session('50000000-0000-0000-0000-000000000015') -> 'exercises' -> 0;
+  assert j -> 'target_blocks' is not null and jsonb_array_length(j -> 'sets') = 1, 'Guardar conserva el plan';
+end $$;
+delete from public.workout_sessions where id in ('50000000-0000-0000-0000-000000000013', '50000000-0000-0000-0000-000000000015');
+delete from public.routines where id = '70000000-0000-0000-0000-000000000005';
+delete from public.exercises where id in ('e0000000-0000-0000-0000-00000000000d', 'e0000000-0000-0000-0000-00000000000e');
+reset role;
+\echo '   Series por bloques (métricas, Última vez, corrección, validación, compatibilidad, rutinas): OK'
+
 select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
 set role authenticated;
 do $$

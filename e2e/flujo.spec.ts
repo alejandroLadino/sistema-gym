@@ -1773,6 +1773,197 @@ test("Inicio: «Tu constancia», racha semanal, rutinas y barra flotante (375 px
   await desk.close();
 });
 
+test("Series por bloques: Smith, laterales, corrección, Progreso, copia y rutinas (375 px)", async ({ browser }) => {
+  const userI = { email: `ines.${run}@example.com`, temp: "Temporal741", final: "InesSegura852" };
+  const admin = await newPage(browser);
+  await login(admin, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await admin.goto("/admin");
+  const form = admin.getByRole("form", { name: "Crear cuenta" });
+  await form.getByLabel("Correo").fill(userI.email);
+  await form.getByLabel("Contraseña inicial").fill(userI.temp);
+  await form.getByRole("button", { name: "Crear cuenta" }).click();
+  await expect(form.getByText(`Cuenta creada para ${userI.email}`)).toBeVisible();
+  await admin.context().close();
+
+  const context = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  page.on("dialog", (d) => d.accept());
+  await login(page, userI.email, userI.temp);
+  await page.getByLabel("Nueva contraseña", { exact: true }).fill(userI.final);
+  await page.getByLabel("Repite la nueva contraseña").fill(userI.final);
+  await page.getByRole("button", { name: "Guardar contraseña" }).click();
+  await expect(page).toHaveURL(/\/$/);
+
+  const SMITH = "Smith inclinado I";
+  const LAT = "Elevaciones laterales I";
+  const filas = (name: string) => page.getByRole("region", { name }).locator(".set-row-blocks");
+  const textoFila = (name: string, n: number) => filas(name).nth(n - 1).locator(".block-set-text");
+  const hoja = () => page.getByRole("dialog", { name: /Serie por bloques|Editar serie|Secuencia planificada/ });
+
+  // Sesión anterior solo con series simples (compatibilidad).
+  await page.goto("/entrenar");
+  await page.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(8));
+  await addExercise(page, SMITH, { create: true, muscle: "Pecho" });
+  let card = page.getByRole("region", { name: SMITH });
+  await card.getByLabel(`Repeticiones por serie de ${SMITH}`).fill("10");
+  await card.getByLabel(`Peso por serie de ${SMITH}`, { exact: false }).fill("20");
+  await card.getByRole("button", { name: "Agregar 3 series" }).click();
+  await saved(page);
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial/);
+
+  // Sesión con series por bloques (hace 2 días).
+  await page.goto("/entrenar");
+  await page.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(2));
+  await addExercise(page, SMITH);
+  card = page.getByRole("region", { name: SMITH });
+  await expect(card.locator(".previous-summary")).toHaveText("3 × 10 a 20 kg"); // «Última vez» con series simples
+  // Smith inclinado: 7 a 40 → 7 a 35 → 7 a 30 kg, 1 vez por serie, 4 series.
+  await card.getByRole("button", { name: "Agregar serie por bloques" }).click();
+  let sheet = hoja();
+  await expect(sheet.getByLabel("Repetir secuencia dentro de la serie")).toHaveValue("1");
+  await expect(sheet.getByLabel("Cantidad de series")).toHaveValue("1");
+  await sheet.getByLabel("Repeticiones del bloque 1").fill("7");
+  await sheet.getByLabel("Peso del bloque 1", { exact: false }).fill("40");
+  await sheet.getByRole("button", { name: "Agregar bloque" }).click();
+  await sheet.getByLabel("Peso del bloque 2", { exact: false }).fill("35");
+  await sheet.getByRole("button", { name: "Agregar bloque" }).click();
+  await sheet.getByLabel("Peso del bloque 3", { exact: false }).fill("30");
+  await sheet.getByLabel("Cantidad de series").fill("4");
+  await expect(sheet.locator(".block-preview")).toContainText("4 series de: 7 reps a 40 kg → 7 a 35 kg → 7 a 30 kg");
+  await shot(page, "20a-serie-por-bloques");
+  await sheet.getByRole("button", { name: "Agregar 4 series" }).click();
+  await expect(sheet).toBeHidden();
+  await expect(filas(SMITH)).toHaveCount(4);
+  await expect(textoFila(SMITH, 1)).toHaveText("7 reps a 40 kg → 7 a 35 kg → 7 a 30 kg");
+
+  // Elevaciones laterales: (7 reps → sostener 7 s) × 3 por serie, 4 series.
+  await addExercise(page, LAT, { create: true, muscle: "Hombros" });
+  await page.getByRole("region", { name: LAT }).getByRole("button", { name: "Agregar serie por bloques" }).click();
+  sheet = hoja();
+  await sheet.getByLabel("Repeticiones del bloque 1").fill("7");
+  await sheet.getByRole("button", { name: "Agregar bloque" }).click();
+  await sheet.getByRole("group", { name: "Tipo del bloque 2" }).getByRole("button", { name: "Sostener" }).click();
+  await sheet.getByLabel("Segundos del bloque 2").fill("7");
+  await sheet.getByLabel("Repetir secuencia dentro de la serie").fill("3");
+  await sheet.getByLabel("Cantidad de series").fill("4");
+  await sheet.getByRole("button", { name: "Agregar 4 series" }).click();
+  await expect(filas(LAT)).toHaveCount(4);
+  await expect(textoFila(LAT, 4)).toHaveText("(7 reps → sostener 7 s) × 3");
+  await saved(page);
+  const sesionBloques = page.url().split("/").pop()!;
+  await shot(page, "20b-filas-por-bloques");
+
+  // Corregir un solo bloque (serie 2 de Smith, bloque 2), recargar y comprobar el resto.
+  await expand(page, SMITH);
+  await filas(SMITH).nth(1).getByRole("button", { name: `Editar serie 2 de ${SMITH}` }).click();
+  sheet = hoja();
+  await expect(sheet.getByLabel("Cantidad de series")).toHaveCount(0);
+  await sheet.getByLabel("Peso del bloque 2", { exact: false }).fill("37,5");
+  await sheet.getByRole("button", { name: "Guardar serie" }).click();
+  await expect(page.locator(".save-status")).toHaveText("Sin guardar");
+  await saved(page);
+  await page.reload();
+  await expand(page, SMITH);
+  await expect(page.getByRole("region", { name: SMITH }).locator(".ex-summary")).toHaveCount(1);
+  await expect(textoFila(SMITH, 2)).toHaveText("7 reps a 40 kg → 7 a 37,5 kg → 7 a 30 kg");
+  for (const n of [1, 3, 4]) await expect(textoFila(SMITH, n)).toHaveText("7 reps a 40 kg → 7 a 35 kg → 7 a 30 kg");
+  // Resumen expandible con la secuencia completa.
+  await filas(SMITH).nth(1).locator("summary").click();
+  await expect(filas(SMITH).nth(1).locator(".block-set-list")).toContainText("Bloque 2: 7 reps a 37,5 kg");
+  await expand(page, LAT);
+  for (const n of [1, 2, 3, 4]) await expect(textoFila(LAT, n)).toHaveText("(7 reps → sostener 7 s) × 3");
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial/);
+  await expect(page.locator(`a[href="/sesiones/${sesionBloques}"]`)).toContainText("2 ejercicios · 8 series");
+
+  // Progreso: cada serie por bloques es una serie; reps con ciclos; sostén aparte; máximo con sus reps.
+  await page.goto("/progreso");
+  const conRegistros = page.getByRole("list", { name: "Ejercicios con registros" });
+  await expect(conRegistros.locator("li").filter({ hasText: SMITH })).toContainText("40 kg × 7");
+  await conRegistros.locator("li").filter({ hasText: SMITH }).getByRole("link").click();
+  let item = page.locator(".history-item").first();
+  await expect(item).toContainText("Máx. 40 kg × 7 · 84 reps totales · 4 series");
+  await item.locator("details").nth(1).locator("summary").click();
+  await expect(item.locator("details").nth(1)).toContainText("Bloque 2: 7 reps a 37,5 kg");
+  await expect(page.locator(".history-item").nth(1)).toContainText("30 reps totales · 3 series"); // la sesión simple
+  await shot(page, "20c-progreso-bloques");
+  await page.goto("/progreso");
+  await conRegistros.locator("li").filter({ hasText: LAT }).getByRole("link").click();
+  item = page.locator(".history-item").first();
+  await expect(item).toContainText("84 reps totales · 4 series · 84 s de sostén");
+  await item.locator("details").first().locator("summary").click();
+  await expect(item.locator("details").first()).toContainText("Bloque 2: sostener 7 s");
+
+  // Copiar la última sesión conserva bloques, orden y ciclos (sesión de ayer).
+  await page.goto("/entrenar");
+  await page.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(1));
+  await addExercise(page, SMITH);
+  card = page.getByRole("region", { name: SMITH });
+  await expect(card.locator(".previous-summary")).toContainText("7 a 37,5 kg");
+  await card.getByRole("button", { name: "Copiar última sesión" }).click();
+  await expect(filas(SMITH)).toHaveCount(4);
+  await expect(textoFila(SMITH, 2)).toHaveText("7 reps a 40 kg → 7 a 37,5 kg → 7 a 30 kg");
+  await addExercise(page, LAT);
+  await page.getByRole("region", { name: LAT }).getByRole("button", { name: "Copiar última sesión" }).click();
+  await expect(filas(LAT)).toHaveCount(4);
+  // Una serie con otra estructura (2 veces la secuencia) para elegir la referencia de la rutina.
+  await filas(LAT).nth(3).getByRole("button", { name: `Editar serie 4 de ${LAT}` }).click();
+  await hoja().getByLabel("Repetir secuencia dentro de la serie").fill("2");
+  await hoja().getByRole("button", { name: "Guardar serie" }).click();
+  await expect(textoFila(LAT, 4)).toHaveText("(7 reps → sostener 7 s) × 2");
+  await expect(textoFila(LAT, 3)).toHaveText("(7 reps → sostener 7 s) × 3");
+  await saved(page);
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial/);
+
+  // «Guardar como rutina»: estructura precargada como meta; se elige cuál usar en laterales.
+  await page.goto(`/sesiones/${(await page.locator(".history-card").first().getAttribute("href"))!.split("/").pop()}`);
+  await page.getByRole("button", { name: "Acciones de la sesión" }).click();
+  await page.getByRole("menuitem", { name: "Guardar como rutina" }).click();
+  await expect(page.getByText("Las series por bloques se precargaron como secuencia")).toBeVisible();
+  await page.getByLabel("Nombre").fill("Pecho y hombro");
+  await expect(page.getByLabel(`Series objetivo de ${SMITH}`)).toHaveValue("4");
+  await expect(page.getByLabel(`Repeticiones del bloque 3 de ${SMITH}`)).toHaveValue("7");
+  await expect(page.getByLabel(`Estructura de referencia de ${SMITH}`)).toHaveCount(0);
+  const estructura = page.getByLabel(`Estructura de referencia de ${LAT}`);
+  await expect(estructura).toBeVisible();
+  await expect(page.getByLabel(`Repetir secuencia de ${LAT}`)).toHaveValue("3");
+  await expect(page.getByLabel(`Series objetivo de ${LAT}`)).toHaveValue("3");
+  await estructura.selectOption({ label: "(7 reps → sostener 7 s) × 2 (1 serie)" });
+  await expect(page.getByLabel(`Repetir secuencia de ${LAT}`)).toHaveValue("2");
+  await expect(page.getByLabel(`Series objetivo de ${LAT}`)).toHaveValue("1");
+  await shot(page, "20d-rutina-con-bloques");
+  await page.getByRole("button", { name: "Guardar rutina" }).click();
+  await expect(page.getByText("Rutina «Pecho y hombro» guardada.")).toBeVisible();
+  const tarjeta = page.getByRole("listitem", { name: "Pecho y hombro" });
+  await expect(tarjeta.locator(".routine-card-exercises > li")).toHaveText([
+    `${SMITH} · 4 series: 7 reps → 7 reps → 7 reps`,
+    `${LAT} · 1 serie: (7 reps → sostener 7 s) × 2`,
+  ]);
+
+  // Usar la rutina: muestra la secuencia planificada (0 series) y permite cargarla con los pesos de la última vez.
+  await tarjeta.getByRole("button", { name: "Usar rutina Pecho y hombro" }).click();
+  await expect(page).toHaveURL(/\/sesiones\/[0-9a-f-]{36}$/);
+  card = page.getByRole("region", { name: SMITH });
+  await expect(card.locator(".ex-goal")).toHaveText("Meta: 4 series: 7 reps → 7 reps → 7 reps");
+  await expect(page.locator(".ex-summary")).toHaveText(["Sin series registradas", "Sin series registradas"]);
+  await expand(page, SMITH);
+  await card.getByRole("button", { name: "Cargar secuencia planificada" }).click();
+  sheet = hoja();
+  await expect(sheet.getByLabel("Cantidad de series")).toHaveValue("4");
+  await expect(sheet.getByLabel("Peso del bloque 1", { exact: false })).toHaveValue("40");
+  await expect(sheet.getByLabel("Peso del bloque 2", { exact: false })).toHaveValue("35"); // primera serie de la última vez
+  await sheet.getByLabel("Cantidad de series").fill("2");
+  await sheet.getByRole("button", { name: "Agregar 2 series" }).click();
+  await expect(filas(SMITH)).toHaveCount(2);
+  await saved(page);
+  await page.reload();
+  await expect(page.getByRole("region", { name: SMITH }).locator(".ex-summary")).toHaveText("2 series · Mejor serie: 40 kg × 7");
+  await expect(page.getByRole("region", { name: LAT }).locator(".ex-summary")).toHaveText("Sin series registradas");
+  await context.close();
+});
+
 test("cuenta B no accede a los datos de A, ni por URL directa", async ({ browser }) => {
   const page = await newPage(browser);
   await login(page, userB.email, userB.temp);
