@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import { ProgressChart } from "@/components/ProgressChart";
+import { formatBlock, isBlockSet } from "@/lib/blocks";
 import { formatDate, formatKg, formatSet, todayLocal } from "@/lib/format";
 import { UNCLASSIFIED_LABEL } from "@/lib/muscle-group-utils";
 import {
@@ -208,13 +209,31 @@ function HistoryItem({ session, weighted }: { session: SessionStat; weighted: bo
         <Link href={`/sesiones/${session.id}`} className="small">Ver sesión</Link>
       </div>
       <ol className="history-sets">
-        {session.sets.map((set, i) => (
-          <li key={i}>{formatSet(set)}</li>
-        ))}
+        {session.sets.map((set, i) =>
+          isBlockSet(set) ? (
+            // Serie por bloques: resumen compacto que se abre para ver la secuencia completa.
+            <li key={i}>
+              <details className="block-set">
+                <summary>{formatSet(set)}</summary>
+                <ol className="block-set-list">
+                  {set.blocks.map((b, j) => (
+                    <li key={j}>
+                      <span className="muted">Bloque {j + 1}:</span> {formatBlock(b)}
+                    </li>
+                  ))}
+                  <li className="muted">Repetir secuencia: {set.rounds === 1 ? "1 vez" : `${set.rounds} veces`}</li>
+                </ol>
+              </details>
+            </li>
+          ) : (
+            <li key={i}>{formatSet(set)}</li>
+          ),
+        )}
       </ol>
       <p className="muted small" style={{ margin: 0 }}>
-        {weighted && session.maxWeight !== null ? `Máx. ${formatKg(session.maxWeight)} kg · ` : ""}
+        {weighted && session.maxWeight !== null ? `Máx. ${formatKg(session.maxWeight)} kg × ${session.best.reps} · ` : ""}
         {session.totalReps} reps totales · {session.setCount} {session.setCount === 1 ? "serie" : "series"}
+        {session.holdSeconds > 0 ? ` · ${session.holdSeconds} s de sostén` : ""}
       </p>
     </li>
   );

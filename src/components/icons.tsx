@@ -54,3 +54,6 @@ export const IconFlame = () => (
 export const IconClock = () => (
   <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
 );
+export const IconPencil = () => (
+  <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z" /><path d="m13.5 6.5 4 4" /></svg>
+);

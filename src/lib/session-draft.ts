@@ -1,10 +1,16 @@
 import { isIsoDate } from "./format";
+import { isBlockSet, MAX_BLOCKS, MAX_HOLD_SECONDS, MAX_ROUNDS, setHoldSeconds, type Block, type BlockPlanItem } from "./blocks";
 import { bestSet, formatBestSet } from "./progress";
 import type { SessionData, SetValue } from "./types";
 import type { Target } from "./routines";
 import { parseReps, parseWeight, type Parsed } from "./validation";
 
-export type DraftSet = { key: string; reps: string; weight: string };
+/** Bloque editable de una serie por bloques (valores como texto). */
+export type DraftBlock = { key: string; type: "reps" | "hold"; value: string; weight: string };
+/** Secuencia editable: bloques en orden y veces que se repite dentro de la serie. */
+export type DraftBlocks = { rounds: string; items: DraftBlock[] };
+/** Serie simple (reps/peso) o, si trae `blocks`, serie por bloques. */
+export type DraftSet = { key: string; reps: string; weight: string; blocks?: DraftBlocks };
 export type DraftExercise = {
   key: string;
   exerciseId: string;
@@ -47,8 +53,62 @@ export function weightToInput(weight: number | null): string {
   return String(Number(weight)).replace(".", ",");
 }
 
+export function blocksToDraft(blocks: Block[] | BlockPlanItem[], rounds: number): DraftBlocks {
+  return {
+    rounds: String(rounds),
+    items: blocks.map((b) => ({
+      key: newKey(),
+      type: b.type,
+      value: String(b.type === "reps" ? b.reps : b.seconds),
+      weight: "weight_kg" in b ? weightToInput(b.weight_kg) : "",
+    })),
+  };
+}
+
 export function setsToDraft(sets: SetValue[]): DraftSet[] {
-  return sets.map((s) => ({ key: newKey(), reps: String(s.reps), weight: weightToInput(s.weight_kg) }));
+  return sets.map((s) =>
+    isBlockSet(s)
+      ? { key: newKey(), reps: "", weight: "", blocks: blocksToDraft(s.blocks, s.rounds ?? 1) }
+      : { key: newKey(), reps: String(s.reps), weight: weightToInput(s.weight_kg) },
+  );
+}
+
+export const MAX_ROUNDS_INPUT = MAX_ROUNDS;
+
+/** Valida una secuencia editable y la convierte en serie por bloques. */
+export function parseBlocks(input: DraftBlocks): { ok: true; set: SetValue } | { ok: false; error: string; blockErrors: Record<string, string> } {
+  const blockErrors: Record<string, string> = {};
+  let error: string | null = null;
+  const rounds = input.rounds.trim();
+  const roundsN = /^\d{1,2}$/.test(rounds) ? Number(rounds) : NaN;
+  if (!(roundsN >= 1 && roundsN <= MAX_ROUNDS)) error = `Repetir secuencia: un entero de 1 a ${MAX_ROUNDS}`;
+  if (input.items.length === 0) error ??= "Agrega al menos un bloque";
+  if (input.items.length > MAX_BLOCKS) error ??= `Máximo ${MAX_BLOCKS} bloques`;
+  const blocks: Block[] = [];
+  input.items.forEach((b, i) => {
+    const weight = parseWeight(b.weight);
+    if (b.type === "reps") {
+      const reps = parseReps(b.value);
+      if (!reps.ok) blockErrors[b.key] = `Bloque ${i + 1}: ${reps.error.toLowerCase()}`;
+      else if (!weight.ok) blockErrors[b.key] = `Bloque ${i + 1}: ${weight.error.toLowerCase()}`;
+      else blocks.push({ type: "reps", reps: reps.value, weight_kg: weight.value });
+    } else {
+      const raw = b.value.trim();
+      const secs = /^\d{1,4}$/.test(raw) ? Number(raw) : NaN;
+      if (!(secs >= 1 && secs <= MAX_HOLD_SECONDS)) blockErrors[b.key] = `Bloque ${i + 1}: segundos de 1 a ${MAX_HOLD_SECONDS}`;
+      else if (!weight.ok) blockErrors[b.key] = `Bloque ${i + 1}: ${weight.error.toLowerCase()}`;
+      else blocks.push({ type: "hold", seconds: secs, weight_kg: weight.value });
+    }
+  });
+  if (error || Object.keys(blockErrors).length) {
+    return { ok: false, error: error ?? Object.values(blockErrors)[0], blockErrors };
+  }
+  return { ok: true, set: { reps: null, weight_kg: null, rounds: roundsN, blocks } };
+}
+
+/** Copia de una secuencia con claves nuevas (para agregar varias series iguales). */
+export function cloneBlocks(b: DraftBlocks): DraftBlocks {
+  return { rounds: b.rounds, items: b.items.map((x) => ({ ...x, key: newKey() })) };
 }
 
 export function sessionToDraft(session: SessionData): Draft {
@@ -63,8 +123,13 @@ export function sessionToDraft(session: SessionData): Draft {
       name: e.name,
       archived: e.archived,
       target:
-        e.target_sets != null || e.target_reps_min != null
-          ? { sets: e.target_sets ?? null, repsMin: e.target_reps_min ?? null, repsMax: e.target_reps_max ?? null }
+        e.target_sets != null || e.target_reps_min != null || e.target_blocks != null
+          ? {
+              sets: e.target_sets ?? null,
+              repsMin: e.target_reps_min ?? null,
+              repsMax: e.target_reps_max ?? null,
+              blocks: e.target_blocks ?? null,
+            }
           : null,
       sets: setsToDraft(e.sets),
     })),
@@ -72,6 +137,7 @@ export function sessionToDraft(session: SessionData): Draft {
 }
 
 export function isSetBlank(set: DraftSet): boolean {
+  if (set.blocks) return false;
   return set.reps.trim() === "" && set.weight.trim() === "";
 }
 
@@ -91,6 +157,12 @@ export function draftToPayload(
   const exercises = draft.exercises.map((ex) => {
     const sets: SetValue[] = [];
     for (const set of ex.sets) {
+      if (set.blocks) {
+        const parsed = parseBlocks(set.blocks);
+        if (!parsed.ok) errors.sets[set.key] = parsed.error;
+        else sets.push(parsed.set);
+        continue;
+      }
       if (isSetBlank(set)) continue;
       const reps = parseReps(set.reps);
       const weight = parseWeight(set.weight);
@@ -169,6 +241,12 @@ export function exerciseSummary(sets: DraftSet[]): { count: number; text: string
   const valid: SetValue[] = [];
   let incomplete = false;
   for (const set of sets) {
+    if (set.blocks) {
+      const parsed = parseBlocks(set.blocks);
+      if (parsed.ok) valid.push(parsed.set);
+      else incomplete = true;
+      continue;
+    }
     if (isSetBlank(set)) continue;
     const reps = parseReps(set.reps);
     const weight = parseWeight(set.weight);
@@ -177,7 +255,9 @@ export function exerciseSummary(sets: DraftSet[]): { count: number; text: string
   }
   if (valid.length === 0) return { count: 0, text: "Sin series registradas", best: null, incomplete };
   const top = bestSet(valid);
-  const best = formatBestSet(top, top.weight_kg !== null);
+  const hold = valid.reduce((sum, s) => sum + setHoldSeconds(s), 0);
+  // Solo sostenes (sin bloques de repeticiones): se resume el tiempo.
+  const best = top.reps === 0 && hold > 0 ? `${hold} s de sostén` : formatBestSet(top, top.weight_kg !== null);
   const count = `${valid.length} ${valid.length === 1 ? "serie" : "series"}`;
   return { count: valid.length, text: `${count} · Mejor serie: ${best}`, best, incomplete };
 }
@@ -191,6 +271,8 @@ export function copyPreviousSets(current: DraftSet[], previous: SetValue[]): Dra
 /** Nueva serie: repite la última para registrar con un solo toque. */
 export function nextSet(sets: DraftSet[]): DraftSet {
   const last = sets.at(-1);
+  // Si la última es por bloques, se repite su secuencia (pesos y ciclos incluidos).
+  if (last?.blocks) return { key: newKey(), reps: "", weight: "", blocks: cloneBlocks(last.blocks) };
   return { key: newKey(), reps: last?.reps ?? "", weight: last?.weight ?? "" };
 }
 

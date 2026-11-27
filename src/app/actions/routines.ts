@@ -1,6 +1,7 @@
 "use server";
 
 import { getActionUser } from "@/lib/auth";
+import { isValidPlan } from "@/lib/blocks";
 import { isIsoDate } from "@/lib/format";
 import {
   MAX_ROUTINE_EXERCISES,
@@ -31,7 +32,8 @@ function isValidRoutine(p: RoutinePayload): boolean {
       optInt(e.target_reps_min, MAX_TARGET_REPS) &&
       optInt(e.target_reps_max, MAX_TARGET_REPS) &&
       (e.target_reps_min === null) === (e.target_reps_max === null) &&
-      (e.target_reps_min === null || e.target_reps_min <= (e.target_reps_max as number)),
+      (e.target_reps_min === null || e.target_reps_min <= (e.target_reps_max as number)) &&
+      (e.target_blocks === null || e.target_blocks === undefined || isValidPlan(e.target_blocks)),
   );
 }
 
@@ -41,7 +43,13 @@ export async function saveRoutine(payload: RoutinePayload): Promise<ActionResult
   if (!isValidRoutine(payload)) return { ok: false, error: "Revisa el nombre, los ejercicios y las metas." };
 
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("save_routine", { p_routine: { ...payload, name: payload.name.trim() } });
+  const { data, error } = await supabase.rpc("save_routine", {
+    p_routine: {
+      ...payload,
+      name: payload.name.trim(),
+      exercises: payload.exercises.map((e) => ({ ...e, target_blocks: e.target_blocks ?? null })),
+    },
+  });
   if (error || !data) {
     if (error?.code === "42501") return { ok: false, error: "La rutina no existe o no te pertenece." };
     if (error?.code === "23505") return { ok: false, error: "Hay ejercicios repetidos en la rutina." };

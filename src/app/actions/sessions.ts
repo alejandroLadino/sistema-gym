@@ -1,6 +1,7 @@
 "use server";
 
 import { getActionUser } from "@/lib/auth";
+import { isValidBlockSet } from "@/lib/blocks";
 import { createClient } from "@/lib/supabase/server";
 import { isIsoDate } from "@/lib/format";
 import type { SessionPayload } from "@/lib/session-draft";
@@ -24,13 +25,15 @@ function isValidPayload(p: SessionPayload): boolean {
       isUuid(e.exercise_id) &&
       Array.isArray(e.sets) &&
       e.sets.length <= 100 &&
-      e.sets.every(
-        (s) =>
-          Number.isInteger(s.reps) &&
-          s.reps >= 1 &&
-          s.reps <= MAX_REPS &&
-          (s.weight_kg === null ||
-            (typeof s.weight_kg === "number" && s.weight_kg >= 0 && s.weight_kg <= MAX_WEIGHT_KG)),
+      e.sets.every((s) =>
+        // Serie por bloques (secuencia + ciclos) o serie simple.
+        s.blocks != null
+          ? isValidBlockSet(s)
+          : Number.isInteger(s.reps) &&
+            (s.reps as number) >= 1 &&
+            (s.reps as number) <= MAX_REPS &&
+            (s.weight_kg === null ||
+              (typeof s.weight_kg === "number" && s.weight_kg >= 0 && s.weight_kg <= MAX_WEIGHT_KG)),
       ),
   );
 }

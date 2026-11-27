@@ -7,7 +7,8 @@ import { deleteRoutine, saveRoutine } from "@/app/actions/routines";
 import { IconChevronDown, IconPlus, IconTrash } from "@/components/icons";
 import { ExercisePicker } from "@/components/session/ExercisePicker";
 import { muscleGroupName, UNCLASSIFIED_LABEL } from "@/lib/muscle-group-utils";
-import { move, routineToPayload, type RoutineDraftExercise, type TargetErrors } from "@/lib/routines";
+import { formatPlan, type BlockPlan } from "@/lib/blocks";
+import { move, planToDraft, routineToPayload, type RoutineDraftExercise, type RoutineDraftPlan, type TargetErrors } from "@/lib/routines";
 import type { Exercise, MuscleGroup } from "@/lib/types";
 import { uuidv4 } from "@/lib/uuid";
 
@@ -15,14 +16,18 @@ type Props = {
   /** null = rutina nueva. */
   routineId: string | null;
   initialName: string;
-  initialExercises: (Omit<RoutineDraftExercise, "key"> & { muscleGroupId: string | null })[];
+  initialExercises: (Omit<RoutineDraftExercise, "key"> & {
+    muscleGroupId: string | null;
+    /** «Guardar como rutina»: estructuras por bloques distintas de la sesión (para elegir una). */
+    planOptions?: { plan: BlockPlan; count: number }[];
+  })[];
   exercises: Exercise[];
   muscleGroups: MuscleGroup[];
   /** Aviso al abrir (p. ej., ejercicios archivados que no se precargaron). */
   notice?: string;
 };
 
-type Row = RoutineDraftExercise & { muscleGroupId: string | null };
+type Row = RoutineDraftExercise & { muscleGroupId: string | null; planOptions?: { plan: BlockPlan; count: number }[] };
 
 let counter = 0;
 const key = () => `r${Date.now().toString(36)}${++counter}`;
@@ -49,6 +54,9 @@ export function RoutineEditor({ routineId, initialName, initialExercises, exerci
     setErrors((e) => (e.targets[k] ? { ...e, targets: { ...e.targets, [k]: {} } } : e));
   };
 
+  const updatePlan = (k: string, fn: (p: RoutineDraftPlan) => RoutineDraftPlan | null) =>
+    setRows((rs) => rs.map((r) => (r.key === k && r.plan ? { ...r, plan: fn(r.plan) } : r)));
+
   const pick = (exercise: Exercise) => {
     setPickerOpen(false);
     const target = replaceTarget;
@@ -62,6 +70,7 @@ export function RoutineEditor({ routineId, initialName, initialExercises, exerci
       sets: target?.sets ?? "",
       repsMin: target?.repsMin ?? "",
       repsMax: target?.repsMax ?? "",
+      plan: target?.plan ?? null,
     };
     setRows((rs) => {
       // Un ejercicio no se repite dentro de la rutina (doble toque incluido).
@@ -219,40 +228,151 @@ export function RoutineEditor({ routineId, initialName, initialExercises, exerci
                       onChange={(e) => update(r.key, { sets: e.target.value })}
                     />
                   </label>
+                  {r.plan ? null : (
+                    <>
                   <span className="routine-times" aria-hidden="true">×</span>
-                  <label className="field">
-                    <span>Reps</span>
-                    <input
-                      className="input"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      autoComplete="off"
-                      placeholder="mín"
-                      aria-label={`Repeticiones mínimas de ${r.name}`}
-                      aria-invalid={err.reps ? true : undefined}
-                      value={r.repsMin}
-                      onChange={(e) => update(r.key, { repsMin: e.target.value })}
-                    />
-                  </label>
-                  <span className="routine-times" aria-hidden="true">–</span>
-                  <label className="field">
-                    <span>Hasta</span>
-                    <input
-                      className="input"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      autoComplete="off"
-                      placeholder="máx"
-                      aria-label={`Repeticiones máximas de ${r.name}`}
-                      aria-invalid={err.reps ? true : undefined}
-                      value={r.repsMax}
-                      onChange={(e) => update(r.key, { repsMax: e.target.value })}
-                    />
-                  </label>
+                      <label className="field">
+                        <span>Reps</span>
+                        <input
+                          className="input"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          autoComplete="off"
+                          placeholder="mín"
+                          aria-label={`Repeticiones mínimas de ${r.name}`}
+                          aria-invalid={err.reps ? true : undefined}
+                          value={r.repsMin}
+                          onChange={(e) => update(r.key, { repsMin: e.target.value })}
+                        />
+                      </label>
+                      <span className="routine-times" aria-hidden="true">–</span>
+                      <label className="field">
+                        <span>Hasta</span>
+                        <input
+                          className="input"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          autoComplete="off"
+                          placeholder="máx"
+                          aria-label={`Repeticiones máximas de ${r.name}`}
+                          aria-invalid={err.reps ? true : undefined}
+                          value={r.repsMax}
+                          onChange={(e) => update(r.key, { repsMax: e.target.value })}
+                        />
+                      </label>
+                    </>
+                  )}
                 </div>
                 {err.sets || err.reps ? (
                   <p className="field-error" role="alert" style={{ margin: 0 }}>{[err.sets, err.reps].filter(Boolean).join(". ")}</p>
                 ) : null}
+
+                {r.planOptions && r.planOptions.length > 1 ? (
+                  <label className="field">
+                    <span>Estructura de referencia</span>
+                    <select
+                      className="input"
+                      aria-label={`Estructura de referencia de ${r.name}`}
+                      defaultValue="0"
+                      onChange={(e) => {
+                        const opt = r.planOptions![Number(e.target.value)];
+                        update(r.key, { plan: planToDraft(opt.plan, key), sets: String(opt.count) });
+                      }}
+                    >
+                      {r.planOptions.map((o, j) => (
+                        <option key={j} value={j}>
+                          {formatPlan(o.plan)} ({o.count} {o.count === 1 ? "serie" : "series"})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+
+                {r.plan ? (
+                  <div className="routine-plan stack" style={{ gap: 8 }}>
+                    <div className="row between">
+                      <strong className="small">Secuencia por bloques</strong>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        aria-label={`Quitar secuencia de ${r.name}`}
+                        onClick={() => update(r.key, { plan: null })}
+                      >
+                        Quitar secuencia
+                      </button>
+                    </div>
+                    <ol className="block-list">
+                      {r.plan.items.map((b, j) => (
+                        <li key={b.key} className="block-item routine-plan-item">
+                          <div className="block-item-head">
+                            <span className="routine-ex-pos" aria-hidden="true">{j + 1}</span>
+                            <div className="segmented" role="group" aria-label={`Tipo del bloque ${j + 1} de ${r.name}`}>
+                              <button type="button" aria-pressed={b.type === "reps"} onClick={() => updatePlan(r.key, (p) => ({ ...p, items: p.items.map((x) => (x.key === b.key ? { ...x, type: "reps" } : x)) }))}>
+                                Repeticiones
+                              </button>
+                              <button type="button" aria-pressed={b.type === "hold"} onClick={() => updatePlan(r.key, (p) => ({ ...p, items: p.items.map((x) => (x.key === b.key ? { ...x, type: "hold" } : x)) }))}>
+                                Sostener
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-icon"
+                              aria-label={`Quitar bloque ${j + 1} de ${r.name}`}
+                              disabled={r.plan!.items.length === 1}
+                              onClick={() => updatePlan(r.key, (p) => ({ ...p, items: p.items.filter((x) => x.key !== b.key) }))}
+                            >
+                              <IconTrash />
+                            </button>
+                          </div>
+                          <input
+                            className="input"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            autoComplete="off"
+                            placeholder={b.type === "reps" ? "reps" : "segundos"}
+                            aria-label={`${b.type === "reps" ? "Repeticiones" : "Segundos"} del bloque ${j + 1} de ${r.name}`}
+                            value={b.value}
+                            onChange={(e) => updatePlan(r.key, (p) => ({ ...p, items: p.items.map((x) => (x.key === b.key ? { ...x, value: e.target.value } : x)) }))}
+                          />
+                        </li>
+                      ))}
+                    </ol>
+                    <div className="row">
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        aria-label={`Agregar bloque a ${r.name}`}
+                        onClick={() => updatePlan(r.key, (p) => ({ ...p, items: [...p.items, { key: key(), type: p.items.at(-1)?.type ?? "reps", value: p.items.at(-1)?.value ?? "" }] }))}
+                      >
+                        <IconPlus /> Agregar bloque
+                      </button>
+                    </div>
+                    <label className="field">
+                      <span>Repetir secuencia dentro de la serie</span>
+                      <input
+                        className="input"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        autoComplete="off"
+                        aria-label={`Repetir secuencia de ${r.name}`}
+                        value={r.plan.rounds}
+                        onChange={(e) => updatePlan(r.key, (p) => ({ ...p, rounds: e.target.value }))}
+                      />
+                    </label>
+                    <p className="muted small" style={{ margin: 0 }}>
+                      Sin pesos: al usar la rutina se proponen los de la última vez.
+                    </p>
+                    {err.plan ? <p className="field-error" role="alert" style={{ margin: 0 }}>{err.plan}</p> : null}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm routine-plan-add"
+                    onClick={() => update(r.key, { plan: { rounds: "1", items: [{ key: key(), type: "reps", value: r.repsMin }] } })}
+                  >
+                    <IconPlus /> Definir secuencia por bloques
+                  </button>
+                )}
 
                 <button
                   type="button"
