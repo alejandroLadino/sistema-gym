@@ -852,7 +852,7 @@ test("Inicio: hoy, semana, sesiones recientes y repetir ejercicios (375 px)", as
   // Usuario nuevo: la acción principal se ve al entrar.
   const hoy = page.locator(".today-card");
   await expect(hoy.getByRole("link", { name: "Iniciar entrenamiento" })).toBeInViewport();
-  await expect(page.getByText("0 sesiones finalizadas")).toBeVisible();
+  await expect(page.locator(".consistency-stats dd")).toHaveText(["0 días", "0 semanas", "0 días"]);
   await expect(page.locator('.week-day[aria-current="date"]')).toHaveCount(1);
   await expect(page.locator(".week-day[data-trained]")).toHaveCount(0);
   await expect(page.getByText("Aún no tienes sesiones finalizadas.")).toBeVisible();
@@ -902,7 +902,10 @@ test("Inicio: hoy, semana, sesiones recientes y repetir ejercicios (375 px)", as
   await page.getByRole("navigation").getByRole("link", { name: "Inicio" }).click();
   await expect(hoy.getByRole("link", { name: "Ver entrenamiento de hoy" })).toBeVisible();
   await expect(hoy.getByRole("link", { name: "Nueva sesión" })).toBeVisible();
-  await expect(page.getByText("1 sesión finalizada")).toBeVisible();
+  // Constancia: hoy cuenta como día entrenado. La de hace 10 días cae en la semana anterior
+  // (racha de 2) si hoy es de jueves a domingo; si no, dos semanas atrás (racha de 1).
+  const racha = (new Date().getDay() + 6) % 7 >= 3 ? "2 semanas" : "1 semana";
+  await expect(page.locator(".consistency-stats dd")).toHaveText(["1 día", racha, "2 días"]);
   await expect(page.locator('.week-day[aria-current="date"][data-trained]')).toHaveCount(1);
   // Abrir una sesión finalizada muestra su estado.
   await hoy.getByRole("link", { name: "Ver entrenamiento de hoy" }).click();
@@ -921,9 +924,10 @@ test("Inicio: hoy, semana, sesiones recientes y repetir ejercicios (375 px)", as
   await page.getByRole("button", { name: "Finalizar sesión" }).click();
   await expect(page).toHaveURL(/\/historial$/);
   await page.getByRole("navigation").getByRole("link", { name: "Inicio" }).click();
-  await expect(page.getByText("2 sesiones finalizadas")).toBeVisible();
+  // Dos sesiones válidas el mismo día cuentan como un día.
+  await expect(page.locator(".consistency-stats dd")).toHaveText(["1 día", racha, "2 días"]);
   await expect(page.locator(".week-day[data-trained]")).toHaveCount(1);
-  await expect(page.locator('.week-day[aria-current="date"]')).toContainText("entrenado (2 sesiones)");
+  await expect(page.locator('.week-day[aria-current="date"]')).toContainText("hoy: entrenado");
   const recientes = page.getByRole("list", { name: "Sesiones recientes" }).locator("li");
   await expect(recientes).toHaveCount(3);
   await expect(recientes.nth(0)).toContainText("Espalda");
@@ -1365,8 +1369,9 @@ test("Mis rutinas: crear, reordenar, metas, usar, editar, eliminar, guardar sesi
   await expect(page).toHaveURL(/\/$/);
 
   // Acceso desde Inicio, junto a «Entrenamiento de hoy».
-  await expect(page.getByRole("link", { name: /Mis rutinas/ })).toBeInViewport();
-  await page.getByRole("link", { name: /Mis rutinas/ }).click();
+  await expect(page.getByRole("heading", { name: "Mis rutinas" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Crea tu primera rutina" })).toBeVisible();
+  await page.getByRole("link", { name: "Ver todas las rutinas" }).click();
   await expect(page.getByText("Todavía no tienes rutinas.")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Navegación principal" }).getByRole("link", { name: "Inicio" })).toHaveAttribute("aria-current", "page");
 
@@ -1602,6 +1607,171 @@ async function agregarEnSelector(page: Page, name: string, muscle: string) {
   await dialog.getByRole("button", { name: "Crear y agregar a la rutina" }).click();
   await expect(dialog).toBeHidden();
 }
+
+test("Inicio: «Tu constancia», racha semanal, rutinas y barra flotante (375 px y escritorio)", async ({ browser }) => {
+  const userH = { email: `hugo.${run}@example.com`, temp: "Temporal852", final: "HugoSegura963" };
+  const admin = await newPage(browser);
+  await login(admin, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await admin.goto("/admin");
+  const form = admin.getByRole("form", { name: "Crear cuenta" });
+  await form.getByLabel("Correo").fill(userH.email);
+  await form.getByLabel("Contraseña inicial").fill(userH.temp);
+  await form.getByRole("button", { name: "Crear cuenta" }).click();
+  await expect(form.getByText(`Cuenta creada para ${userH.email}`)).toBeVisible();
+  await admin.context().close();
+
+  const context = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  page.on("dialog", (d) => d.accept());
+  await login(page, userH.email, userH.temp);
+  await page.getByLabel("Nueva contraseña", { exact: true }).fill(userH.final);
+  await page.getByLabel("Repite la nueva contraseña").fill(userH.final);
+  await page.getByRole("button", { name: "Guardar contraseña" }).click();
+  await expect(page).toHaveURL(/\/$/);
+
+  const stats = page.locator(".consistency-stats dd");
+  const hoyDot = page.locator('.week-day[aria-current="date"]');
+  const inicio = async () => {
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Tu constancia" })).toBeVisible();
+  };
+
+  // Usuario nuevo: cero días, semana vacía y la acción principal visible al entrar.
+  await expect(page.locator(".today-card").getByRole("link", { name: "Iniciar entrenamiento" })).toBeInViewport();
+  await expect(stats).toHaveText(["0 días", "0 semanas", "0 días"]);
+  await expect(page.locator(".week-day[data-trained]")).toHaveCount(0);
+  await expect(hoyDot).toHaveCount(1);
+  await expect(hoyDot).toContainText("hoy: sin entrenamiento");
+  await expect(page.getByText("Entrena al menos un día esta semana para empezar tu racha.")).toBeVisible();
+  await shot(page, "18a-constancia-nuevo");
+
+  const registrar = async (name: string, opts: { create?: string; date?: string; sets?: boolean } = {}) => {
+    await page.goto("/entrenar");
+    if (opts.date) await page.getByLabel("Fecha del entrenamiento").fill(opts.date);
+    await addExercise(page, name, opts.create ? { create: true, muscle: opts.create } : {});
+    if (opts.sets !== false) {
+      const card = page.getByRole("region", { name });
+      await card.getByLabel(`Repeticiones por serie de ${name}`).fill("10");
+      await card.getByLabel(`Peso por serie de ${name}`, { exact: false }).fill("20");
+      await card.getByRole("button", { name: "Agregar 3 series" }).click();
+    }
+    await saved(page);
+    return page.url().split("/").pop()!;
+  };
+  const finalizar = async () => {
+    await page.getByRole("button", { name: "Finalizar sesión" }).click();
+    await expect(page).toHaveURL(/\/historial/);
+  };
+
+  // En curso con series: todavía no cuenta.
+  const s1 = await registrar("Sentadilla H", { create: "Cuádriceps" });
+  await inicio();
+  await expect(stats).toHaveText(["0 días", "0 semanas", "0 días"]);
+  // Finalizada: cuenta hoy.
+  await page.goto(`/sesiones/${s1}`);
+  await finalizar();
+  await inicio();
+  await expect(stats).toHaveText(["1 día", "1 semana", "1 día"]);
+  await expect(hoyDot).toContainText("hoy: entrenado");
+  await expect(page.locator(".streak-badge")).toContainText("1 semana");
+  // Segunda sesión válida el mismo día: sigue siendo un día.
+  const s2 = await registrar("Sentadilla H");
+  await finalizar();
+  // Finalizada sin series (hace 10 días): no cuenta.
+  await registrar("Sentadilla H", { date: isoDaysAgo(10), sets: false });
+  await finalizar();
+  await inicio();
+  await expect(stats).toHaveText(["1 día", "1 semana", "1 día"]);
+  await expect(page.locator(".week-day[data-trained]")).toHaveCount(1);
+  await shot(page, "18b-constancia-hoy");
+
+  // Corregir la fecha de una sesión a la semana anterior: dos días y dos semanas de racha.
+  await page.goto(`/sesiones/${s2}`);
+  await page.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(7));
+  await saved(page);
+  await inicio();
+  await expect(stats).toHaveText(["1 día", "2 semanas", "2 días"]);
+
+  // Eliminar la de hoy: la semana actual queda sin actividad → racha pendiente (1 semana).
+  await page.goto(`/sesiones/${s1}`);
+  await page.getByRole("button", { name: "Eliminar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial/);
+  await inicio();
+  await expect(stats).toHaveText(["0 días", "1 semana", "1 día"]);
+  await expect(page.locator(".consistency-note")).toHaveText(
+    "Pendiente: entrena antes del domingo para mantener tu racha de 1 semana.",
+  );
+  await expect(page.locator(".streak-badge")).toHaveAttribute("data-pending", "true");
+  await shot(page, "18c-constancia-pendiente");
+
+  // Reloj del dispositivo: el domingo de esta semana la racha sigue pendiente; el lunes
+  // siguiente (una semana completa sin entrenar) se reinicia. Límites con la fecha local.
+  const base = new Date();
+  const domingo = new Date(base.getFullYear(), base.getMonth(), base.getDate() + ((7 - base.getDay()) % 7), 20, 0, 0);
+  const lunes = new Date(domingo.getFullYear(), domingo.getMonth(), domingo.getDate() + 1, 8, 0, 0);
+  await page.clock.setFixedTime(domingo);
+  await inicio();
+  await expect(hoyDot.locator(".week-letter")).toHaveText("D");
+  await expect(stats).toHaveText(["0 días", "1 semana", "1 día"]);
+  await expect(page.locator(".streak-badge")).toHaveAttribute("data-pending", "true");
+  await page.clock.setFixedTime(lunes);
+  await inicio();
+  await expect(hoyDot.locator(".week-letter")).toHaveText("L");
+  await expect(stats).toHaveText(["0 días", "0 semanas", "1 día"]);
+  await expect(page.locator(".streak-badge")).toHaveAttribute("data-zero", "true");
+
+  // Volver a la fecha real. «Mis rutinas» en Inicio: crear, ver y usar una rutina.
+  await page.clock.setFixedTime(base);
+  await page.goto("/rutinas/nueva");
+  await page.getByLabel("Nombre").fill("Pierna H");
+  await page.getByRole("button", { name: "Agregar ejercicio", exact: true }).click();
+  await page.getByRole("dialog").getByLabel("Buscar ejercicio").fill("Sentadilla H");
+  await page.getByRole("dialog").getByRole("listitem").filter({ hasText: "Sentadilla H" }).first().getByRole("button").click();
+  await page.getByRole("button", { name: "Guardar rutina" }).click();
+  await expect(page.getByText("Rutina «Pierna H» guardada.")).toBeVisible();
+  await inicio();
+  const mini = page.getByRole("list", { name: "Rutinas" }).getByRole("listitem", { name: "Pierna H" });
+  await expect(mini).toContainText("Cuádriceps");
+  await expect(mini).toContainText("1 ejercicio");
+  await expect(page.getByRole("link", { name: "Ver todas las rutinas" })).toHaveAttribute("href", "/rutinas");
+  await shot(page, "18d-inicio-375");
+  await mini.getByRole("button", { name: "Usar rutina Pierna H" }).click();
+  await expect(page).toHaveURL(/\/sesiones\/[0-9a-f-]{36}$/);
+  await expect(page.getByText("Sesión nueva con la rutina «Pierna H»")).toBeVisible();
+  // Continuar desde Inicio.
+  const rutinaSesion = page.url().split("/").pop()!;
+  await inicio();
+  await page.locator(".today-card").getByRole("link", { name: "Continuar entrenamiento" }).click();
+  await expect(page).toHaveURL(new RegExp(`/sesiones/${rutinaSesion}$`));
+
+  // Barra flotante: no tapa el final de Inicio ni los controles del editor; activo reconocible.
+  const nav = page.getByRole("navigation", { name: "Navegación principal" });
+  await expect(nav.getByRole("link", { name: "Inicio" })).toHaveAttribute("aria-current", "page");
+  const navBox = (await nav.boundingBox())!;
+  expect(navBox.x).toBeGreaterThan(0);
+  expect(navBox.y + navBox.height).toBeLessThan(667);
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(300);
+  const eliminar = (await page.getByRole("button", { name: "Eliminar sesión" }).boundingBox())!;
+  expect(eliminar.y + eliminar.height).toBeLessThanOrEqual(navBox.y);
+  await inicio();
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(300);
+  const ultima = (await page.locator(".home > section").last().boundingBox())!;
+  expect(ultima.y + ultima.height).toBeLessThanOrEqual(navBox.y);
+  await shot(page, "18e-inicio-final-375");
+  await context.close();
+
+  // Escritorio: la barra vuelve arriba y la constancia se ve completa.
+  const desk = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const dp = await desk.newPage();
+  await login(dp, userH.email, userH.final);
+  await expect(dp.getByRole("heading", { name: "Tu constancia" })).toBeVisible();
+  const dNav = (await dp.getByRole("navigation", { name: "Navegación principal" }).boundingBox())!;
+  expect(dNav.y).toBeLessThan(120);
+  await shot(dp, "18f-inicio-escritorio");
+  await desk.close();
+});
 
 test("cuenta B no accede a los datos de A, ni por URL directa", async ({ browser }) => {
   const page = await newPage(browser);

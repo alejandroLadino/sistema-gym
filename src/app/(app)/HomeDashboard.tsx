@@ -4,20 +4,32 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useSyncExternalStore } from "react";
 import { repeatSession } from "@/app/actions/sessions";
-import { IconCalendar, IconCheck, IconChevronRight, IconList, IconPlus } from "@/components/icons";
+import { IconCalendar, IconCheck, IconChevronRight, IconClock, IconFlame, IconPlus } from "@/components/icons";
+import { consistency as computeConsistency, type ConsistencyRow } from "@/lib/consistency";
+import { muscleGroupName } from "@/lib/muscle-group-utils";
+import type { Routine } from "@/lib/routines";
+import type { MuscleGroup } from "@/lib/types";
+import { useRoutineStarter } from "./rutinas/useRoutineStarter";
 import { formatDate, formatLongDate, todayLocal } from "@/lib/format";
 import {
   inProgressToday,
   otherInProgress,
   primaryAction,
   recentFinished,
-  weekSummary,
   type HomeSession,
 } from "@/lib/home";
 import { hasUnsavedNewDraft } from "@/lib/session-draft";
 import { uuidv4 } from "@/lib/uuid";
 
-type Props = { userId: string; firstName: string; serverToday: string; sessions: HomeSession[] };
+type Props = {
+  userId: string;
+  firstName: string;
+  serverToday: string;
+  sessions: HomeSession[];
+  consistency: ConsistencyRow | null;
+  routines: Routine[];
+  muscleGroups: MuscleGroup[];
+};
 
 const noop = () => () => {};
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -30,7 +42,7 @@ function counts(s: HomeSession) {
   return `${plural(s.exercise_count, "ejercicio", "ejercicios")} · ${plural(s.set_count, "serie", "series")}`;
 }
 
-export function HomeDashboard({ userId, firstName, serverToday, sessions }: Props) {
+export function HomeDashboard({ userId, firstName, serverToday, sessions, consistency, routines, muscleGroups }: Props) {
   const router = useRouter();
   // «Hoy» es la fecha local del dispositivo; el servidor solo da un valor inicial.
   const today = useSyncExternalStore(noop, () => todayLocal(), () => serverToday);
@@ -38,7 +50,8 @@ export function HomeDashboard({ userId, firstName, serverToday, sessions }: Prop
 
   const primary = primaryAction(sessions, today, localDraft);
   const others = otherInProgress(sessions, primary);
-  const week = weekSummary(sessions, today);
+  const stats = computeConsistency(consistency, today);
+  const starter = useRoutineStarter({ sessions, today });
   const recent = recentFinished(sessions, 3);
   const current = inProgressToday(sessions, today);
 
@@ -140,25 +153,43 @@ export function HomeDashboard({ userId, firstName, serverToday, sessions }: Prop
             </p>
           ) : null}
         </div>
-        <Link href="/rutinas" className="card routines-link">
-          <span className="routines-link-icon" aria-hidden="true"><IconList /></span>
-          <span className="routines-link-text">
-            <strong>Mis rutinas</strong>
-            <span className="muted small">Empieza con una plantilla de ejercicios</span>
-          </span>
-          <span className="catalog-row-chevron" aria-hidden="true"><IconChevronRight /></span>
-        </Link>
       </section>
 
-      <section className="stack" style={{ gap: 10 }} aria-labelledby="semana-titulo">
-        <div className="row between">
-          <h2 id="semana-titulo" style={{ margin: 0 }}>Esta semana</h2>
-          <span className="muted small">{plural(week.total, "sesión finalizada", "sesiones finalizadas")}</span>
+      <section className="card consistency-card" aria-labelledby="constancia-titulo">
+        <div className="consistency-head">
+          <h2 id="constancia-titulo">Tu constancia</h2>
+          <span className="streak-badge" data-pending={stats.pending || undefined} data-zero={stats.streak === 0 || undefined}>
+            <IconFlame />
+            <span>
+              {plural(stats.streak, "semana", "semanas")}
+              <span className="sr-only"> de racha{stats.pending ? ", pendiente esta semana" : ""}</span>
+            </span>
+          </span>
         </div>
-        <ol className="week-strip card" aria-label="Días de esta semana">
-          {week.days.map((d, i) => {
+        <dl className="consistency-stats">
+          <div>
+            <dt>Esta semana</dt>
+            <dd>{plural(stats.weekDays, "día", "días")}</dd>
+          </div>
+          <div data-accent>
+            <dt>Racha semanal</dt>
+            <dd>{plural(stats.streak, "semana", "semanas")}</dd>
+          </div>
+          <div>
+            <dt>Total</dt>
+            <dd>{plural(stats.totalDays, "día", "días")}</dd>
+          </div>
+        </dl>
+        {stats.pending ? (
+          <p className="consistency-note" data-pending>
+            <IconClock /> Pendiente: entrena antes del domingo para mantener tu racha de {plural(stats.streak, "semana", "semanas")}.
+          </p>
+        ) : stats.streak === 0 ? (
+          <p className="consistency-note">Entrena al menos un día esta semana para empezar tu racha.</p>
+        ) : null}
+        <ol className="week-strip" aria-label="Días de esta semana">
+          {stats.days.map((d, i) => {
             const day = Number(d.date.slice(8));
-            const status = d.trained ? `entrenado${d.sessions > 1 ? ` (${d.sessions} sesiones)` : ""}` : "sin entrenamiento";
             return (
               <li
                 key={d.date}
@@ -169,15 +200,66 @@ export function HomeDashboard({ userId, firstName, serverToday, sessions }: Prop
               >
                 <span className="sr-only">
                   {DAY_NAMES[i]} {day}
-                  {d.isToday ? ", hoy" : ""}: {status}
+                  {d.isToday ? ", hoy" : ""}: {d.trained ? "entrenado" : "sin entrenamiento"}
                 </span>
                 <span aria-hidden="true" className="week-letter">{DAY_LETTERS[i]}</span>
                 <span aria-hidden="true" className="week-dot">{d.trained ? <IconCheck /> : day}</span>
-                <span aria-hidden="true" className="week-label">{d.isToday ? "Hoy" : ""}</span>
+                <span aria-hidden="true" className="week-label">{d.isToday ? "Hoy" : d.trained ? "Hecho" : ""}</span>
               </li>
             );
           })}
         </ol>
+        <p className="week-legend" aria-hidden="true">
+          <span className="legend-trained"><IconCheck /> Entrenado</span>
+          <span className="legend-today">Hoy</span>
+        </p>
+      </section>
+
+      <section className="stack" style={{ gap: 10 }} aria-labelledby="rutinas-titulo">
+        <div className="row between">
+          <h2 id="rutinas-titulo" style={{ margin: 0 }}>Mis rutinas</h2>
+          <Link href="/rutinas" className="small section-link" aria-label="Ver todas las rutinas">
+            Ver todas <IconChevronRight />
+          </Link>
+        </div>
+        {routines.length === 0 ? (
+          <Link href="/rutinas/nueva" className="card routines-empty">
+            <span className="routines-link-text">
+              <strong>Crea tu primera rutina</strong>
+              <span className="muted small">Guarda tus ejercicios en orden y empieza más rápido.</span>
+            </span>
+            <span className="catalog-row-chevron" aria-hidden="true"><IconChevronRight /></span>
+          </Link>
+        ) : (
+          <ul className="routine-strip" aria-label="Rutinas">
+            {routines.slice(0, 6).map((r) => {
+              const groups = Array.from(
+                new Set(r.exercises.map((e) => muscleGroupName(muscleGroups, e.muscle_group_id)).filter((g): g is string => Boolean(g))),
+              );
+              return (
+                <li key={r.id} className="card routine-mini" aria-label={r.name}>
+                  <Link href={`/rutinas/${r.id}`} className="routine-mini-link">
+                    <strong>{r.name}</strong>
+                    <span className="muted small">{groups.length ? groups.join(" · ") : "Sin grupo muscular"}</span>
+                    <span className="small">{plural(r.exercises.length, "ejercicio", "ejercicios")}</span>
+                  </Link>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    onClick={() => starter.askUse(r)}
+                    disabled={starter.starting !== null}
+                    aria-label={`Usar rutina ${r.name}`}
+                  >
+                    {starter.starting === r.id ? "Iniciando…" : "Usar rutina"}
+                  </button>
+                  {starter.error?.id === r.id ? (
+                    <p className="alert alert-error small" role="alert" style={{ margin: 0 }}>{starter.error.text}</p>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
 
       <section className="stack" style={{ gap: 10 }} aria-labelledby="recientes-titulo">
@@ -241,6 +323,7 @@ export function HomeDashboard({ userId, firstName, serverToday, sessions }: Prop
           </div>
         </div>
       ) : null}
+      {starter.dialogs}
     </div>
   );
 }
