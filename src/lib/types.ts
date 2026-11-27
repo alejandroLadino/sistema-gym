@@ -21,6 +21,8 @@ export type Exercise = {
   id: string;
   name: string;
   muscle_group_id: string | null;
+  /** Equipo (Mancuernas, Barra…); null = sin indicar (ejercicios anteriores). */
+  equipment?: string | null;
   notes: string | null;
   archived_at: string | null;
 };

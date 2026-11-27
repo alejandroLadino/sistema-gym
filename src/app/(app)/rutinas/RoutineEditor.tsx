@@ -7,6 +7,7 @@ import { deleteRoutine, saveRoutine } from "@/app/actions/routines";
 import { IconChevronDown, IconPlus, IconTrash } from "@/components/icons";
 import { ExercisePicker } from "@/components/session/ExercisePicker";
 import { muscleGroupName, UNCLASSIFIED_LABEL } from "@/lib/muscle-group-utils";
+import { equipmentLabel } from "@/lib/equipment";
 import { formatPlan, type BlockPlan } from "@/lib/blocks";
 import { move, planToDraft, routineToPayload, type RoutineDraftExercise, type RoutineDraftPlan, type TargetErrors } from "@/lib/routines";
 import type { Exercise, MuscleGroup } from "@/lib/types";
@@ -170,7 +171,12 @@ export function RoutineEditor({ routineId, initialName, initialExercises, exerci
                   <span className="routine-ex-pos" aria-hidden="true">{i + 1}</span>
                   <span className="routine-ex-title">
                     <strong>{r.name}</strong>
-                    <span className="muted small">{group}</span>
+                    <span className="muted small">
+                      {equipmentLabel(catalog.find((c) => c.id === r.exerciseId)?.equipment) ? (
+                        <span className="ex-equipment">{equipmentLabel(catalog.find((c) => c.id === r.exerciseId)?.equipment)} · </span>
+                      ) : null}
+                      {group}
+                    </span>
                     {r.archived ? <span className="badge badge-warning">Archivado</span> : null}
                     {partners.length ? (
                       <span className="alt-badge">⇄ Series alternadas · con {partners.join(", ")}</span>

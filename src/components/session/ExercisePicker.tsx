@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { quickCreateExercise } from "@/app/actions/exercises";
+import { EquipmentSelect } from "@/components/EquipmentSelect";
 import { MuscleGroupSelect } from "@/components/MuscleGroupSelect";
+import { equipmentLabel, exerciseLabel, exerciseSearchText } from "@/lib/equipment";
 import { IconPlus } from "@/components/icons";
 import {
   GROUP_REQUIRED,
   muscleGroupName,
   NAME_REQUIRED,
+  sameVariant,
   UNCLASSIFIED,
   UNCLASSIFIED_LABEL,
   type ExerciseFieldErrors,
@@ -84,11 +87,21 @@ export function ExercisePicker({
     () =>
       active
         .filter((e) => group === ALL || (group === UNCLASSIFIED ? !e.muscle_group_id : e.muscle_group_id === group))
-        .sort((a, b) => a.name.localeCompare(b.name, "es")),
+        .sort(
+          (a, b) =>
+            a.name.localeCompare(b.name, "es") || (equipmentLabel(a.equipment) ?? "").localeCompare(equipmentLabel(b.equipment) ?? "", "es"),
+        ),
     [active, group],
   );
   const q = normalizeSearch(query);
-  const visible = q ? inGroup.filter((e) => normalizeSearch(e.name).includes(q)) : inGroup;
+  // La búsqueda mira el nombre y el equipo («press barra», «mancuernas»…).
+  const words = q.split(/\s+/).filter(Boolean);
+  const visible = words.length
+    ? inGroup.filter((e) => {
+        const text = normalizeSearch(exerciseSearchText(e));
+        return words.every((w) => text.includes(w));
+      })
+    : inGroup;
   const groupLabel =
     group === ALL ? null : group === UNCLASSIFIED ? UNCLASSIFIED_LABEL : muscleGroupName(muscleGroups, group);
 
@@ -161,11 +174,22 @@ export function ExercisePicker({
                 const already = inSession.has(e.id);
                 return (
                   <div key={e.id} role="listitem">
-                    <button type="button" className="sheet-item" disabled={already} onClick={() => void pick(e)}>
-                      <span>
+                    <button
+                      type="button"
+                      className="sheet-item"
+                      disabled={already}
+                      onClick={() => void pick(e)}
+                      aria-label={exerciseLabel(e)}
+                    >
+                      <span className="picker-item-text">
                         <strong>{e.name}</strong>
-                        {group === ALL ? (
-                          <span className="muted small"> · {muscleGroupName(muscleGroups, e.muscle_group_id) ?? UNCLASSIFIED_LABEL}</span>
+                        {equipmentLabel(e.equipment) || group === ALL ? (
+                          <span className="picker-item-sub">
+                            {equipmentLabel(e.equipment) ? <span className="ex-equipment">{equipmentLabel(e.equipment)}</span> : null}
+                            {group === ALL ? (
+                              <span className="muted small">{muscleGroupName(muscleGroups, e.muscle_group_id) ?? UNCLASSIFIED_LABEL}</span>
+                            ) : null}
+                          </span>
                         ) : null}
                       </span>
                       {already ? <span className="badge badge-primary">En la {destination}</span> : null}
@@ -239,6 +263,7 @@ function CreateExerciseForm({
 }) {
   const [name, setName] = useState(initialName);
   const [groupId, setGroupId] = useState(initialGroup);
+  const [equipment, setEquipment] = useState("");
   const [errors, setErrors] = useState<ExerciseFieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -272,8 +297,9 @@ function CreateExerciseForm({
     const next: ExerciseFieldErrors = {};
     if (!clean) next.name = NAME_REQUIRED;
     if (!groupId) next.muscle_group_id = GROUP_REQUIRED;
-    const dup = clean ? catalog.find((ex) => normalizeSearch(ex.name) === normalizeSearch(clean)) : undefined;
-    if (dup) next.name = `Ya tienes «${dup.name}» en tu catálogo.`;
+    // El mismo nombre con otro equipo es otra variante; solo se evita repetir nombre + equipo.
+    const dup = clean ? catalog.find((ex) => sameVariant(ex, { name: clean, equipment: equipment || null }, normalizeSearch)) : undefined;
+    if (dup) next.name = `Ya tienes «${exerciseLabel(dup)}» en tu catálogo.`;
     setErrors(next);
     setExisting(dup ?? null);
     setError(null);
@@ -281,7 +307,7 @@ function CreateExerciseForm({
 
     setBusy(true);
     try {
-      const res = await quickCreateExercise({ name: clean, muscle_group_id: groupId });
+      const res = await quickCreateExercise({ name: clean, muscle_group_id: groupId, equipment: equipment || null });
       if (!res.ok) {
         setErrors(res.fieldErrors ?? {});
         setError(res.error);
@@ -325,7 +351,7 @@ function CreateExerciseForm({
           ) : null}
           {existing ? (
             <button type="button" className="btn btn-sm" onClick={() => void addToSession(existing)}>
-              Agregar «{existing.name}» a la sesión
+              Agregar «{exerciseLabel(existing)}» a la {destination}
             </button>
           ) : null}
         </div>
@@ -337,6 +363,7 @@ function CreateExerciseForm({
           onChange={setGroupId}
           error={errors.muscle_group_id}
         />
+        <EquipmentSelect value={equipment} onChange={setEquipment} error={errors.equipment} />
       </div>
       <div className="picker-foot">
         <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>

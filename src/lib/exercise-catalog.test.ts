@@ -77,3 +77,17 @@ describe("filtros en la URL y precarga del grupo", () => {
     expect(hasActiveFilters({ ...DEFAULT_FILTERS, view: "archivados" })).toBe(false);
   });
 });
+
+describe("equipo en el catálogo", () => {
+  it("la búsqueda encuentra por equipo y ordena las variantes", async () => {
+    const { filterCatalog, DEFAULT_FILTERS } = await import("./exercise-catalog");
+    const { exerciseLabel } = await import("./equipment");
+    const ex = (id: string, equipment: string | null) => ({
+      id, name: "Press de banca plano", muscle_group_id: "pecho", equipment, notes: null, archived_at: null,
+    });
+    const list = [ex("m", "mancuernas"), ex("b", "barra"), ex("x", null)];
+    expect(filterCatalog(list, [], { ...DEFAULT_FILTERS, q: "mancuernas" }).map((e) => e.id)).toEqual(["m"]);
+    expect(filterCatalog(list, [], DEFAULT_FILTERS).map((e) => e.id)).toEqual(["x", "b", "m"]);
+    expect(list.map(exerciseLabel)).toEqual(["Press de banca plano · Mancuernas", "Press de banca plano · Barra", "Press de banca plano"]);
+  });
+});

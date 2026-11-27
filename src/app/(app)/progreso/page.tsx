@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth";
 import { EXERCISE_COLUMNS, getMuscleGroups } from "@/lib/muscle-groups";
 import { overviewSummary, type OverviewRow } from "@/lib/progress";
+import { equipmentLabel } from "@/lib/equipment";
 import { createClient } from "@/lib/supabase/server";
 import type { Exercise } from "@/lib/types";
 import { ProgressList, type ProgressItem } from "./ProgressList";
@@ -23,6 +24,7 @@ export default async function ProgressIndexPage({ searchParams }: PageProps<"/pr
   const items: ProgressItem[] = ((exercises ?? []) as Exercise[]).map((e) => ({
     id: e.id,
     name: e.name,
+    equipment: equipmentLabel(e.equipment),
     groupId: e.muscle_group_id,
     archived: Boolean(e.archived_at),
     summary: summaries.get(e.id) ?? null,

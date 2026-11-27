@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { EXERCISE_COLUMNS, getMuscleGroups } from "@/lib/muscle-groups";
 import { muscleGroupName } from "@/lib/muscle-group-utils";
+import { equipmentLabel } from "@/lib/equipment";
 import type { ProgressRow } from "@/lib/progress";
 import { createClient } from "@/lib/supabase/server";
 import type { Exercise } from "@/lib/types";
@@ -37,6 +38,7 @@ export default async function ExerciseProgressPage({ params, searchParams }: Pag
         exercise={{
           id: exercise.id,
           name: exercise.name,
+          equipment: equipmentLabel(exercise.equipment),
           groupName: muscleGroupName(groups, exercise.muscle_group_id),
           archived: Boolean(exercise.archived_at),
         }}

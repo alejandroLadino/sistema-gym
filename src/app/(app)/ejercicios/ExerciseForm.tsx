@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useId, useRef } from "react";
 import { createExercise, updateExercise, type ExerciseFormState } from "@/app/actions/exercises";
 import { FormMessage } from "@/components/FormMessage";
+import { EquipmentSelect } from "@/components/EquipmentSelect";
 import { MuscleGroupSelect } from "@/components/MuscleGroupSelect";
 import { SubmitButton } from "@/components/SubmitButton";
 import { UNCLASSIFIED_LABEL } from "@/lib/muscle-group-utils";
@@ -29,7 +30,7 @@ export function ExerciseForm({ exercise, groups }: { exercise?: Exercise; groups
       <div className="form-grid cols-2">
         <div className="field">
           <label className="field">
-            <span>Nombre</span>
+            <span>Nombre del ejercicio</span>
             <input
               className="input"
               name="name"
@@ -52,6 +53,11 @@ export function ExerciseForm({ exercise, groups }: { exercise?: Exercise; groups
           emptyLabel={unclassified ? `${UNCLASSIFIED_LABEL} — selecciona un grupo` : "Selecciona un grupo"}
           defaultValue={values?.muscle_group_id ?? exercise?.muscle_group_id}
           error={state.fieldErrors?.muscle_group_id}
+        />
+        <EquipmentSelect
+          key={values?.equipment ?? "equipo"}
+          defaultValue={values?.equipment ?? exercise?.equipment ?? ""}
+          error={state.fieldErrors?.equipment}
         />
       </div>
       <label className="field">

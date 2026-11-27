@@ -15,6 +15,7 @@ import {
 } from "@/lib/exercise-catalog";
 import { muscleGroupName, UNCLASSIFIED, UNCLASSIFIED_LABEL } from "@/lib/muscle-group-utils";
 import type { Exercise, MuscleGroup } from "@/lib/types";
+import { equipmentLabel, exerciseLabel } from "@/lib/equipment";
 import { ExerciseSheet, type SavedExercise, type SheetMode } from "./ExerciseSheet";
 
 type Toast = { text: string; show?: Exercise };
@@ -91,12 +92,13 @@ export function ExerciseCatalog({ exercises, groups, initialFilters }: Props) {
       id: saved.id,
       name: saved.name,
       muscle_group_id: saved.muscle_group_id,
+      equipment: saved.equipment,
       notes: saved.notes,
       archived_at: saved.archived_at,
     };
     remember(e);
     setSheet(null);
-    afterChange(e, saved.created ? `«${e.name}» creado` : "Cambios guardados");
+    afterChange(e, saved.created ? `«${exerciseLabel(e)}» creado` : "Cambios guardados");
   }
 
   function onArchiveChange(ex: Exercise, archived: boolean) {
@@ -216,11 +218,14 @@ export function ExerciseCatalog({ exercises, groups, initialFilters }: Props) {
                 <button type="button" className="catalog-row" onClick={() => setSheet({ type: "edit", exercise: e })}>
                   <span className="catalog-row-text">
                     <strong>{e.name}</strong>
-                    {groupName ? (
-                      <span className="muted small">{groupName}</span>
-                    ) : (
-                      <span className="badge badge-warning">{UNCLASSIFIED_LABEL}</span>
-                    )}
+                    <span className="catalog-row-sub">
+                      {equipmentLabel(e.equipment) ? <span className="ex-equipment">{equipmentLabel(e.equipment)}</span> : null}
+                      {groupName ? (
+                        <span className="muted small">{groupName}</span>
+                      ) : (
+                        <span className="badge badge-warning">{UNCLASSIFIED_LABEL}</span>
+                      )}
+                    </span>
                   </span>
                   <span className="catalog-row-chevron" aria-hidden="true"><IconChevronRight /></span>
                 </button>

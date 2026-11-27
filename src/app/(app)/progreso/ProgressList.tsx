@@ -13,6 +13,8 @@ import { saveProgressListQuery } from "./list-query";
 export type ProgressItem = {
   id: string;
   name: string;
+  /** Equipo (etiqueta) o null si no está indicado. */
+  equipment: string | null;
   groupId: string | null;
   archived: boolean;
   summary: OverviewSummary | null;
@@ -61,7 +63,7 @@ export function ProgressList({
 
   const needle = normalizeSearch(q);
   const match = (i: ProgressItem) =>
-    (group === ALL || i.groupId === group) && (!needle || normalizeSearch(i.name).includes(needle));
+    (group === ALL || i.groupId === group) && (!needle || normalizeSearch(`${i.name} ${i.equipment ?? ""}`).includes(needle));
 
   const withRecords = items.filter((i) => !i.archived && i.summary).sort(byRecent);
   const noRecords = items.filter((i) => !i.archived && !i.summary).sort((a, b) => a.name.localeCompare(b.name, "es"));
@@ -74,10 +76,11 @@ export function ProgressList({
     const groupName = muscleGroupName(groups, i.groupId) ?? UNCLASSIFIED_LABEL;
     return (
       <li key={i.id}>
-        <Link href={`/progreso/${i.id}`} className="catalog-row progress-row">
+        <Link href={`/progreso/${i.id}`} className="catalog-row progress-row" aria-label={i.equipment ? `${i.name} · ${i.equipment}` : undefined}>
           <span className="catalog-row-text">
             <strong>{i.name}</strong>
             <span className="muted small">
+              {i.equipment ? <span className="ex-equipment">{i.equipment} · </span> : null}
               {groupName}
               {i.summary ? ` · ${formatDate(i.summary.lastDate, { year: false })}` : ""}
             </span>

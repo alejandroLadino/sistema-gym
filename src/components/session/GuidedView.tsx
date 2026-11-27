@@ -15,6 +15,8 @@ import { BarWeightField, LoadPicker } from "./LoadPicker";
 
 type Props = {
   exercises: DraftExercise[];
+  /** Equipo del ejercicio (subtítulo bajo el nombre). */
+  equipmentOf: (exerciseId: string) => string | null;
   steps: Step[];
   index: number;
   previous: Record<string, PreviousSets | null> | undefined;
@@ -113,6 +115,7 @@ export function GuidedView(props: Props) {
         {step.kind === "single" ? (
           <SingleCard
             key={step.id}
+            equipmentOf={props.equipmentOf}
             ex={byKey.get(step.exKey)!}
             prev={previous?.[byKey.get(step.exKey)!.exerciseId]}
             prevError={prevError}
@@ -127,6 +130,7 @@ export function GuidedView(props: Props) {
         ) : (
           <AltCard
             key={step.id}
+            equipmentOf={props.equipmentOf}
             step={step}
             byKey={byKey}
             previous={previous}
@@ -402,6 +406,7 @@ function CompletedBanner({ onReopen }: { onReopen: () => void }) {
 // --- Ejercicio suelto -------------------------------------------------------------
 
 function SingleCard({
+  equipmentOf,
   ex,
   prev,
   prevError,
@@ -413,6 +418,7 @@ function SingleCard({
   onFinish,
   onReopen,
 }: {
+  equipmentOf: (exerciseId: string) => string | null;
   ex: DraftExercise;
   prev: PreviousSets | null | undefined;
   prevError: boolean;
@@ -436,6 +442,7 @@ function SingleCard({
     <div className="stack guided-body">
       <div className="guided-head">
         <h2 id="guiado-titulo" ref={titleRef} tabIndex={-1}>{ex.name}</h2>
+        {equipmentOf(ex.exerciseId) ? <p className="ex-subtitle" style={{ margin: 0 }}>{equipmentOf(ex.exerciseId)}</p> : null}
         {target || progress ? (
           <p className="guided-meta" style={{ margin: 0 }}>
             {target ? <span className="ex-goal">Meta: {target}</span> : null}
@@ -484,6 +491,7 @@ function SingleCard({
 // --- Series alternadas -----------------------------------------------------------------
 
 function AltCard({
+  equipmentOf,
   step,
   byKey,
   previous,
@@ -497,6 +505,7 @@ function AltCard({
   onFinishAll,
   onReopen,
 }: {
+  equipmentOf: (exerciseId: string) => string | null;
   step: Extract<Step, { kind: "alt" }>;
   byKey: Map<string, DraftExercise>;
   previous: Record<string, PreviousSets | null> | undefined;
@@ -548,6 +557,7 @@ function AltCard({
           {active ? <span className="guided-round">Vuelta {activeRound} de {rounds}</span> : null}
         </p>
         <h2 id="guiado-titulo" ref={titleRef} tabIndex={-1}>{active ? active.name : names.join(" + ")}</h2>
+        {active && equipmentOf(active.exerciseId) ? <p className="ex-subtitle" style={{ margin: 0 }}>{equipmentOf(active.exerciseId)}</p> : null}
         {active ? (
           <p className="guided-meta" style={{ margin: 0 }}>
             {formatTarget(active.target) ? <span className="ex-goal">Meta: {formatTarget(active.target)}</span> : null}

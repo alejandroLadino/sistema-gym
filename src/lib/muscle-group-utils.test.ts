@@ -37,7 +37,7 @@ describe("validación de ejercicios (grupo obligatorio)", () => {
     const ids = ["pecho", "espalda"];
     expect(validateExerciseInput({ name: "  Press  ", muscle_group_id: "pecho" }, ids)).toEqual({
       ok: true,
-      value: { name: "Press", muscle_group_id: "pecho" },
+      value: { name: "Press", muscle_group_id: "pecho", equipment: null },
     });
     expect(validateExerciseInput({ name: "Press", muscle_group_id: "" }, ids)).toEqual({
       ok: false,
@@ -50,5 +50,23 @@ describe("validación de ejercicios (grupo obligatorio)", () => {
       ok: false,
       errors: { name: "Escribe el nombre del ejercicio" },
     });
+  });
+
+  it("equipo opcional de la lista y variantes por nombre + equipo", async () => {
+    const { validateExerciseInput, sameVariant } = await import("./muscle-group-utils");
+    const { normalizeSearch } = await import("./validation");
+    const ids = ["pecho"];
+    expect(validateExerciseInput({ name: "Press de banca plano", muscle_group_id: "pecho", equipment: "barra" }, ids)).toEqual({
+      ok: true,
+      value: { name: "Press de banca plano", muscle_group_id: "pecho", equipment: "barra" },
+    });
+    expect(validateExerciseInput({ name: "Press", muscle_group_id: "pecho", equipment: "trineo" }, ids)).toEqual({
+      ok: false,
+      errors: { equipment: "Elige un equipo de la lista" },
+    });
+    const barra = { name: "Press de banca plano", equipment: "barra" };
+    expect(sameVariant(barra, { name: "press de BANCA plano ", equipment: "barra" }, normalizeSearch)).toBe(true);
+    expect(sameVariant(barra, { name: "Press de banca plano", equipment: "mancuernas" }, normalizeSearch)).toBe(false);
+    expect(sameVariant({ name: "Press", equipment: null }, { name: "Press" }, normalizeSearch)).toBe(true);
   });
 });

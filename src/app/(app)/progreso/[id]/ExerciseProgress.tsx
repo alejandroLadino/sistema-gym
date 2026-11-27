@@ -29,7 +29,7 @@ import {
 import { useProgressListHref } from "../list-query";
 
 type Props = {
-  exercise: { id: string; name: string; groupName: string | null; archived: boolean };
+  exercise: { id: string; name: string; equipment: string | null; groupName: string | null; archived: boolean };
   rows: ProgressRow[];
   initial: { range: string; from: string; to: string; metric: string };
 };
@@ -99,6 +99,7 @@ export function ExerciseProgress({ exercise, rows, initial }: Props) {
       <div className="stack" style={{ gap: 6 }}>
         <Link href={backHref} className="back-link">‹ Progreso</Link>
         <h1 style={{ margin: 0 }}>{exercise.name}</h1>
+        {exercise.equipment ? <p className="ex-subtitle" style={{ margin: 0 }}>{exercise.equipment}</p> : null}
         <div className="row small muted">
           <span>{exercise.groupName ?? UNCLASSIFIED_LABEL} · {weighted ? "Con peso" : "Peso corporal"}</span>
           {exercise.archived ? <span className="badge">Archivado</span> : null}
