@@ -10,6 +10,7 @@ import { formatSequence, formatSetTotals, formatStep, isBlockSet, sameShape, typ
 import { formatDate, summarizeSets, todayLocal } from "@/lib/format";
 import { historyHref } from "@/lib/history-query";
 import { formatTarget, type Target } from "@/lib/routines";
+import { equipmentLabel } from "@/lib/equipment";
 import {
   buildSteps,
   nextAltGroup,
@@ -763,6 +764,9 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
   const validation = draftToPayload(draft);
   const setErrors = !validation.ok && showErrors ? validation.errors.sets : {};
   const inSession = new Set(exerciseIds);
+  // Equipo de cada ejercicio (del catálogo): subtítulo bajo el nombre.
+  const equipmentById = new Map(catalog.map((c) => [c.id, equipmentLabel(c.equipment)]));
+  const equipmentOf = (exerciseId: string) => equipmentById.get(exerciseId) ?? null;
   const isNew = !savedOnce.current;
   const guidedOpen = view === "guided" && draft.exercises.length > 0 && !finished;
 
@@ -829,6 +833,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
         ) : null}
         <GuidedView
           exercises={draft.exercises}
+          equipmentOf={equipmentOf}
           steps={steps}
           index={guidedIndex}
           previous={prevForDate}
@@ -981,6 +986,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
                   <span className="ex-chevron" aria-hidden="true"><IconChevronDown /></span>
                   <span className="ex-title">
                     <h3>{ex.name}</h3>
+                    {equipmentOf(ex.exerciseId) ? <span className="ex-subtitle">{equipmentOf(ex.exerciseId)}</span> : null}
                     {formatTarget(ex.target) ? (
                       <span id={`${bodyId}-meta`} className="ex-goal">Meta: {formatTarget(ex.target)}</span>
                     ) : null}
@@ -1328,6 +1334,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
           header={
             <p className="swap-current" style={{ margin: 0 }}>
               <span className="muted small">Ejercicio actual</span> <strong>{swap.target.name}</strong>
+              {equipmentOf(swap.target.exerciseId) ? <span className="ex-equipment">{equipmentOf(swap.target.exerciseId)}</span> : null}
               <span className="badge badge-primary">Solo en esta sesión</span>
             </p>
           }

@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { Exercise } from "@/lib/types";
 import { isUuid } from "@/lib/validation";
 import { ExerciseForm } from "../ExerciseForm";
+import { equipmentLabel } from "@/lib/equipment";
 
 export const metadata: Metadata = { title: "Editar ejercicio" };
 
@@ -32,6 +33,7 @@ export default async function ExercisePage({ params, searchParams }: PageProps<"
       <div className="page-head">
         <div>
           <h1>{data.name}</h1>
+          {equipmentLabel(data.equipment) ? <div className="ex-subtitle">{equipmentLabel(data.equipment)}</div> : null}
           {data.muscle_group_id ? (
             <div className="muted">{muscleGroupName(groups, data.muscle_group_id)}</div>
           ) : (
@@ -60,7 +62,7 @@ export default async function ExercisePage({ params, searchParams }: PageProps<"
             : "Deja de aparecer al registrar entrenamientos. Su historial y progreso se conservan."}
         </p>
         {error === "duplicado" ? (
-          <p className="alert alert-error">Ya tienes un ejercicio activo con este nombre. Renombra uno de los dos.</p>
+          <p className="alert alert-error">Ya tienes un ejercicio activo con este nombre y este equipo. Cambia el nombre o el equipo de uno de los dos.</p>
         ) : null}
         <form action={setExerciseArchived}>
           <input type="hidden" name="id" value={data.id} />

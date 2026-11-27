@@ -9,7 +9,7 @@ import { EXERCISE_COLUMNS, getMuscleGroups } from "@/lib/muscle-groups";
 import { GROUP_REQUIRED, validateExerciseInput, type ExerciseFieldErrors } from "@/lib/muscle-group-utils";
 import { cleanText, isUuid } from "@/lib/validation";
 
-export type ExerciseFormValues = { name: string; muscle_group_id: string; notes: string };
+export type ExerciseFormValues = { name: string; muscle_group_id: string; equipment: string; notes: string };
 export type ExerciseFormState = {
   error?: string;
   message?: string;
@@ -22,19 +22,19 @@ export type ExerciseFormState = {
 
 function formValues(formData: FormData): ExerciseFormValues {
   const text = (k: string) => (typeof formData.get(k) === "string" ? String(formData.get(k)) : "");
-  return { name: text("name"), muscle_group_id: text("muscle_group_id"), notes: text("notes") };
+  return { name: text("name"), muscle_group_id: text("muscle_group_id"), equipment: text("equipment"), notes: text("notes") };
 }
 
 export type QuickCreateResult =
   | { ok: true; data: Exercise }
   | { ok: false; error: string; fieldErrors?: ExerciseFieldErrors; duplicate?: boolean };
 
-const DUPLICATE = "Ya tienes un ejercicio activo con ese nombre.";
+const DUPLICATE = "Ya tienes un ejercicio activo con ese nombre y ese equipo.";
 const NO_ACCESS = "Tu sesión expiró o no tienes acceso. Vuelve a iniciar sesión.";
 const CHECK_FIELDS = "Revisa los campos marcados.";
 
 /** Valida contra el catálogo real de grupos (servidor). */
-async function validate(input: { name: unknown; muscle_group_id: unknown }) {
+async function validate(input: { name: unknown; muscle_group_id: unknown; equipment?: unknown }) {
   const groups = await getMuscleGroups();
   return validateExerciseInput(input, groups.map((g) => g.id));
 }
@@ -51,7 +51,11 @@ function dbError(code: string | undefined, fallback: string): { error: string; f
 
 export async function createExercise(_prev: ExerciseFormState, formData: FormData): Promise<ExerciseFormState> {
   if (!(await getActionUser())) return { error: NO_ACCESS };
-  const res = await validate({ name: formData.get("name"), muscle_group_id: formData.get("muscle_group_id") });
+  const res = await validate({
+    name: formData.get("name"),
+    muscle_group_id: formData.get("muscle_group_id"),
+    equipment: formData.get("equipment"),
+  });
   if (!res.ok) return { error: CHECK_FIELDS, fieldErrors: res.errors, values: formValues(formData) };
 
   const supabase = await createClient();
@@ -69,7 +73,11 @@ export async function createExercise(_prev: ExerciseFormState, formData: FormDat
 }
 
 /** Creación desde el modal «Agregar ejercicio» de la sesión. */
-export async function quickCreateExercise(input: { name: string; muscle_group_id: string | null }): Promise<QuickCreateResult> {
+export async function quickCreateExercise(input: {
+  name: string;
+  muscle_group_id: string | null;
+  equipment?: string | null;
+}): Promise<QuickCreateResult> {
   if (!(await getActionUser())) return { ok: false, error: NO_ACCESS };
   const res = await validate(input);
   if (!res.ok) return { ok: false, error: CHECK_FIELDS, fieldErrors: res.errors };
@@ -89,7 +97,11 @@ export async function updateExercise(_prev: ExerciseFormState, formData: FormDat
   if (!(await getActionUser())) return { error: NO_ACCESS };
   const id = formData.get("id");
   if (!isUuid(id)) return { error: "Ejercicio inválido." };
-  const res = await validate({ name: formData.get("name"), muscle_group_id: formData.get("muscle_group_id") });
+  const res = await validate({
+    name: formData.get("name"),
+    muscle_group_id: formData.get("muscle_group_id"),
+    equipment: formData.get("equipment"),
+  });
   if (!res.ok) return { error: CHECK_FIELDS, fieldErrors: res.errors, values: formValues(formData) };
 
   const supabase = await createClient();
@@ -142,7 +154,7 @@ export async function archiveExercise(
     .select("id");
   if (error) {
     if (error.code === "23505") {
-      return { ok: false, error: "Ya tienes un ejercicio activo con este nombre. Renombra uno de los dos para restaurarlo." };
+      return { ok: false, error: "Ya tienes un ejercicio activo con este nombre y este equipo. Cambia el nombre o el equipo de uno de los dos para restaurarlo." };
     }
     return { ok: false, error: "No se pudo guardar. Revisa tu conexión y reintenta." };
   }

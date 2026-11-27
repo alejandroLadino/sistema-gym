@@ -11,4 +11,4 @@ export const getMuscleGroups = cache(async (): Promise<MuscleGroup[]> => {
 });
 
 /** Columnas de exercises que usa la app. */
-export const EXERCISE_COLUMNS = "id, name, muscle_group_id, notes, archived_at";
+export const EXERCISE_COLUMNS = "id, name, muscle_group_id, equipment, notes, archived_at";

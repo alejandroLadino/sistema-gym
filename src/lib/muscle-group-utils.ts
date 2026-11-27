@@ -1,3 +1,4 @@
+import { parseEquipment, type Equipment } from "./equipment";
 import type { MuscleGroup } from "./types";
 
 export const MUSCLE_GROUP_ID = /^[a-z_]{1,40}$/;
@@ -31,21 +32,42 @@ export const NAME_REQUIRED = "Escribe el nombre del ejercicio";
 export const UNCLASSIFIED = "sin_clasificar";
 export const UNCLASSIFIED_LABEL = "Sin clasificar";
 
-export type ExerciseFieldErrors = { name?: string; muscle_group_id?: string };
+export type ExerciseFieldErrors = { name?: string; muscle_group_id?: string; equipment?: string };
+export const EQUIPMENT_INVALID = "Elige un equipo de la lista";
 
 /**
- * Valida nombre y grupo de un ejercicio. El grupo es obligatorio y debe existir
- * en el catálogo (`groupIds`).
+ * Valida nombre, grupo y equipo de un ejercicio. El grupo es obligatorio y debe existir
+ * en el catálogo (`groupIds`); el equipo es opcional (sin indicar = null).
  */
 export function validateExerciseInput(
-  input: { name: unknown; muscle_group_id: unknown },
+  input: { name: unknown; muscle_group_id: unknown; equipment?: unknown },
   groupIds: string[],
-): { ok: true; value: { name: string; muscle_group_id: string } } | { ok: false; errors: ExerciseFieldErrors } {
+):
+  | { ok: true; value: { name: string; muscle_group_id: string; equipment: Equipment | null } }
+  | { ok: false; errors: ExerciseFieldErrors } {
   const errors: ExerciseFieldErrors = {};
   const name = typeof input.name === "string" ? input.name.trim().slice(0, 80) : "";
   if (!name) errors.name = NAME_REQUIRED;
   const group = parseMuscleGroupId(input.muscle_group_id);
   if (!group.ok || !group.value || !groupIds.includes(group.value)) errors.muscle_group_id = GROUP_REQUIRED;
-  if (errors.name || errors.muscle_group_id) return { ok: false, errors };
-  return { ok: true, value: { name, muscle_group_id: (group as { value: string }).value } };
+  const equipment = parseEquipment(input.equipment);
+  if (!equipment.ok) errors.equipment = EQUIPMENT_INVALID;
+  if (errors.name || errors.muscle_group_id || errors.equipment) return { ok: false, errors };
+  return {
+    ok: true,
+    value: {
+      name,
+      muscle_group_id: (group as { value: string }).value,
+      equipment: (equipment as { value: Equipment | null }).value,
+    },
+  };
+}
+
+/** ¿Ya hay otro ejercicio activo con el mismo nombre y equipo? (sin distinguir mayúsculas ni acentos) */
+export function sameVariant(
+  a: { name: string; equipment?: string | null },
+  b: { name: string; equipment?: string | null },
+  normalize: (s: string) => string,
+): boolean {
+  return normalize(a.name) === normalize(b.name) && (a.equipment ?? null) === (b.equipment ?? null);
 }

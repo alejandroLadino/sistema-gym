@@ -1,3 +1,4 @@
+import { equipmentLabel } from "./equipment";
 import { muscleGroupName, UNCLASSIFIED } from "./muscle-group-utils";
 import type { Exercise, MuscleGroup } from "./types";
 import { normalizeSearch } from "./validation";
@@ -8,7 +9,7 @@ export type CatalogFilters = { q: string; group: string; view: CatalogView };
 
 export const DEFAULT_FILTERS: CatalogFilters = { q: "", group: ALL_GROUPS, view: "activos" };
 
-/** ¿El ejercicio pasa los filtros? La búsqueda mira el nombre y el nombre del grupo. */
+/** ¿El ejercicio pasa los filtros? La búsqueda mira el nombre, el equipo y el nombre del grupo. */
 export function matchesFilters(exercise: Exercise, groups: MuscleGroup[], filters: CatalogFilters): boolean {
   const archived = Boolean(exercise.archived_at);
   if (filters.view === "activos" ? archived : !archived) return false;
@@ -19,14 +20,16 @@ export function matchesFilters(exercise: Exercise, groups: MuscleGroup[], filter
   }
   const q = normalizeSearch(filters.q);
   if (!q) return true;
-  const text = normalizeSearch(`${exercise.name} ${muscleGroupName(groups, exercise.muscle_group_id) ?? ""}`);
+  const text = normalizeSearch(
+    `${exercise.name} ${equipmentLabel(exercise.equipment) ?? ""} ${muscleGroupName(groups, exercise.muscle_group_id) ?? ""}`,
+  );
   return text.includes(q);
 }
 
 export function filterCatalog(exercises: Exercise[], groups: MuscleGroup[], filters: CatalogFilters): Exercise[] {
   return exercises
     .filter((e) => matchesFilters(e, groups, filters))
-    .sort((a, b) => a.name.localeCompare(b.name, "es"));
+    .sort((a, b) => a.name.localeCompare(b.name, "es") || (equipmentLabel(a.equipment) ?? "").localeCompare(equipmentLabel(b.equipment) ?? "", "es"));
 }
 
 export function hasActiveFilters(filters: CatalogFilters): boolean {

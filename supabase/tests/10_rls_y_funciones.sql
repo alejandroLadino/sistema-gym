@@ -954,6 +954,76 @@ begin
 end $$;
 \echo '   Guiado, cambio de ejercicio y series alternadas (guardado, compatibilidad, rutinas, aislamiento): OK'
 
+-- Equipo del ejercicio: variantes con el mismo nombre ------------------------------------
+select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+insert into public.exercises (id, name, muscle_group_id) values
+  ('e0000000-0000-0000-0000-000000000031', 'Press de banca plano', 'pecho');
+do $$
+declare ok boolean; r record;
+begin
+  -- Ejercicio anterior sin equipo con historial.
+  perform public.save_workout_session(jsonb_build_object('id', '50000000-0000-0000-0000-000000000031', 'session_date', '2026-11-20',
+    'exercises', jsonb_build_array(jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-000000000031',
+      'sets', '[{"reps": 8, "weight_kg": 60}]'::jsonb))));
+  -- Misma combinación nombre + «sin indicar»: duplicado.
+  ok := false;
+  begin
+    insert into public.exercises (name, muscle_group_id) values (' press de BANCA plano ', 'pecho');
+  exception when unique_violation then ok := true;
+  end;
+  assert ok, 'Nombre + sin equipo no se repite';
+  -- Mismo nombre con otro equipo: otra variante con su propio ID.
+  insert into public.exercises (id, name, muscle_group_id, equipment) values
+    ('e0000000-0000-0000-0000-000000000032', 'Press de banca plano', 'pecho', 'mancuernas');
+  ok := false;
+  begin
+    insert into public.exercises (name, muscle_group_id, equipment) values ('Press de banca plano', 'pecho', 'mancuernas');
+  exception when unique_violation then ok := true;
+  end;
+  assert ok, 'Nombre + equipo no se repite';
+  ok := false;
+  begin
+    insert into public.exercises (name, muscle_group_id, equipment) values ('Remo', 'espalda', 'trineo');
+  exception when check_violation then ok := true;
+  end;
+  assert ok, 'Solo equipos de la lista';
+  -- Asignar equipo al anterior conserva su ID e historial; Progreso queda separado.
+  update public.exercises set equipment = 'barra' where id = 'e0000000-0000-0000-0000-000000000031';
+  perform public.save_workout_session(jsonb_build_object('id', '50000000-0000-0000-0000-000000000032', 'session_date', '2026-11-27',
+    'exercises', jsonb_build_array(jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-000000000032',
+      'sets', '[{"reps": 10, "weight_kg": 22}]'::jsonb))));
+  select * into r from public.get_exercise_progress('e0000000-0000-0000-0000-000000000031', null, null);
+  assert r.max_weight_kg = 60 and r.session_date = '2026-11-20', format('Historial de la barra: %s', row_to_json(r));
+  select * into r from public.get_exercise_progress('e0000000-0000-0000-0000-000000000032', null, null);
+  assert r.max_weight_kg = 22, format('Historial de las mancuernas: %s', row_to_json(r));
+  -- Archivar y restaurar una variante choca solo con la misma combinación.
+  update public.exercises set archived_at = now() where id = 'e0000000-0000-0000-0000-000000000032';
+  insert into public.exercises (id, name, muscle_group_id, equipment) values
+    ('e0000000-0000-0000-0000-000000000033', 'Press de banca plano', 'pecho', 'mancuernas');
+  ok := false;
+  begin
+    update public.exercises set archived_at = null where id = 'e0000000-0000-0000-0000-000000000032';
+  exception when unique_violation then ok := true;
+  end;
+  assert ok, 'Restaurar choca con la misma variante activa';
+end $$;
+reset role;
+select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
+set role authenticated;
+-- Otra persona puede tener la misma variante (el catálogo es personal).
+insert into public.exercises (name, muscle_group_id, equipment) values ('Press de banca plano', 'pecho', 'mancuernas');
+do $$
+begin
+  assert not exists (select 1 from public.exercises where id = 'e0000000-0000-0000-0000-000000000031'), 'Beto no ve las variantes de Ana';
+  delete from public.exercises where name = 'Press de banca plano';
+end $$;
+reset role;
+delete from public.workout_sessions where id in ('50000000-0000-0000-0000-000000000031', '50000000-0000-0000-0000-000000000032');
+delete from public.exercises where id in ('e0000000-0000-0000-0000-000000000031', 'e0000000-0000-0000-0000-000000000032',
+  'e0000000-0000-0000-0000-000000000033');
+\echo '   Equipo: variantes con el mismo nombre, duplicados, historial y aislamiento: OK'
+
 select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
 set role authenticated;
 do $$

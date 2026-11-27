@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import { archiveExercise, createExercise, updateExercise } from "@/app/actions/exercises";
+import { EquipmentSelect } from "@/components/EquipmentSelect";
 import { MuscleGroupSelect } from "@/components/MuscleGroupSelect";
 import {
   UNCLASSIFIED_LABEL,
@@ -18,6 +19,7 @@ export type SavedExercise = {
   id: string;
   name: string;
   muscle_group_id: string;
+  equipment: string | null;
   notes: string | null;
   archived_at: string | null;
   created: boolean;
@@ -37,6 +39,7 @@ export function ExerciseSheet({ mode, groups, onClose, onSaved, onArchiveChange 
   const [name, setName] = useState(editing?.name ?? "");
   const [groupId, setGroupId] = useState(editing ? (editing.muscle_group_id ?? "") : mode.type === "create" ? mode.initialGroup : "");
   const [notes, setNotes] = useState(editing?.notes ?? "");
+  const [equipment, setEquipment] = useState(editing?.equipment ?? "");
   const [errors, setErrors] = useState<ExerciseFieldErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"save" | "archive" | null>(null);
@@ -65,7 +68,7 @@ export function ExerciseSheet({ mode, groups, onClose, onSaved, onArchiveChange 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (sending.current) return;
-    const check = validateExerciseInput({ name, muscle_group_id: groupId }, groups.map((g) => g.id));
+    const check = validateExerciseInput({ name, muscle_group_id: groupId, equipment }, groups.map((g) => g.id));
     if (!check.ok) {
       setErrors(check.errors);
       setError(null);
@@ -79,6 +82,7 @@ export function ExerciseSheet({ mode, groups, onClose, onSaved, onArchiveChange 
     if (editing) fd.set("id", editing.id);
     fd.set("name", check.value.name);
     fd.set("muscle_group_id", check.value.muscle_group_id);
+    fd.set("equipment", check.value.equipment ?? "");
     fd.set("notes", notes);
     try {
       const res = editing ? await updateExercise({}, fd) : await createExercise({}, fd);
@@ -92,6 +96,7 @@ export function ExerciseSheet({ mode, groups, onClose, onSaved, onArchiveChange 
         id: res.exerciseId,
         name: check.value.name,
         muscle_group_id: check.value.muscle_group_id,
+        equipment: check.value.equipment,
         notes: notes.trim() || null,
         archived_at: editing?.archived_at ?? null,
         created: !editing,
@@ -155,7 +160,7 @@ export function ExerciseSheet({ mode, groups, onClose, onSaved, onArchiveChange 
 
           <div className="field">
             <label className="field">
-              <span>Nombre</span>
+              <span>Nombre del ejercicio</span>
               <input
                 ref={nameRef}
                 className="input"
@@ -184,6 +189,8 @@ export function ExerciseSheet({ mode, groups, onClose, onSaved, onArchiveChange 
             emptyLabel={unclassified ? `${UNCLASSIFIED_LABEL} — selecciona un grupo` : "Selecciona un grupo"}
             error={errors.muscle_group_id}
           />
+
+          <EquipmentSelect value={equipment} onChange={setEquipment} error={errors.equipment} />
 
           <label className="field">
             <span>Notas (opcional)</span>
