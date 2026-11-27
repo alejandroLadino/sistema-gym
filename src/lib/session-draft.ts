@@ -6,11 +6,11 @@ import type { Target } from "./routines";
 import { parseReps, parseWeight, type Parsed } from "./validation";
 
 /** Bloque editable de una serie por bloques (valores como texto). */
-export type DraftBlock = { key: string; type: "reps" | "hold"; value: string; weight: string };
+export type DraftBlock = { key: string; type: "reps" | "hold"; value: string; weight: string; bar?: boolean };
 /** Secuencia editable: bloques en orden y veces que se repite dentro de la serie. */
 export type DraftBlocks = { rounds: string; items: DraftBlock[] };
 /** Serie simple (reps/peso) o, si trae `blocks`, serie por bloques. */
-export type DraftSet = { key: string; reps: string; weight: string; blocks?: DraftBlocks };
+export type DraftSet = { key: string; reps: string; weight: string; blocks?: DraftBlocks; bar?: boolean };
 export type DraftExercise = {
   key: string;
   exerciseId: string;
@@ -61,6 +61,7 @@ export function blocksToDraft(blocks: Block[] | BlockPlanItem[], rounds: number)
       type: b.type,
       value: String(b.type === "reps" ? b.reps : b.seconds),
       weight: "weight_kg" in b ? weightToInput(b.weight_kg) : "",
+      ...("bar_only" in b && b.bar_only ? { bar: true } : {}),
     })),
   };
 }
@@ -69,7 +70,7 @@ export function setsToDraft(sets: SetValue[]): DraftSet[] {
   return sets.map((s) =>
     isBlockSet(s)
       ? { key: newKey(), reps: "", weight: "", blocks: blocksToDraft(s.blocks, s.rounds ?? 1) }
-      : { key: newKey(), reps: String(s.reps), weight: weightToInput(s.weight_kg) },
+      : { key: newKey(), reps: String(s.reps), weight: weightToInput(s.weight_kg), ...(s.bar_only ? { bar: true } : {}) },
   );
 }
 
@@ -91,13 +92,13 @@ export function parseBlocks(input: DraftBlocks): { ok: true; set: SetValue } | {
       const reps = parseReps(b.value);
       if (!reps.ok) blockErrors[b.key] = `Paso ${i + 1}: ${reps.error.toLowerCase()}`;
       else if (!weight.ok) blockErrors[b.key] = `Paso ${i + 1}: ${weight.error.toLowerCase()}`;
-      else blocks.push({ type: "reps", reps: reps.value, weight_kg: weight.value });
+      else blocks.push({ type: "reps", reps: reps.value, weight_kg: weight.value, ...(b.bar ? { bar_only: true } : {}) });
     } else {
       const raw = b.value.trim();
       const secs = /^\d{1,4}$/.test(raw) ? Number(raw) : NaN;
       if (!(secs >= 1 && secs <= MAX_HOLD_SECONDS)) blockErrors[b.key] = `Paso ${i + 1}: segundos de 1 a ${MAX_HOLD_SECONDS}`;
       else if (!weight.ok) blockErrors[b.key] = `Paso ${i + 1}: ${weight.error.toLowerCase()}`;
-      else blocks.push({ type: "hold", seconds: secs, weight_kg: weight.value });
+      else blocks.push({ type: "hold", seconds: secs, weight_kg: weight.value, ...(b.bar ? { bar_only: true } : {}) });
     }
   });
   if (error || Object.keys(blockErrors).length) {
@@ -137,7 +138,7 @@ export function sessionToDraft(session: SessionData): Draft {
 }
 
 export function isSetBlank(set: DraftSet): boolean {
-  if (set.blocks) return false;
+  if (set.blocks || set.bar) return false;
   return set.reps.trim() === "" && set.weight.trim() === "";
 }
 
@@ -168,7 +169,7 @@ export function draftToPayload(
       const weight = parseWeight(set.weight);
       if (!reps.ok) errors.sets[set.key] = reps.error;
       else if (!weight.ok) errors.sets[set.key] = weight.error;
-      else sets.push({ reps: reps.value, weight_kg: weight.value });
+      else sets.push({ reps: reps.value, weight_kg: weight.value, ...(set.bar ? { bar_only: true } : {}) });
     }
     return { exercise_id: ex.exerciseId, sets };
   });
@@ -188,7 +189,7 @@ export function draftToPayload(
 
 export const MAX_QUICK_SETS = 20;
 
-export type QuickAddInput = { count: string; reps: string; weight: string };
+export type QuickAddInput = { count: string; reps: string; weight: string; bar?: boolean };
 export type QuickAddErrors = Partial<Record<keyof QuickAddInput, string>>;
 
 /** Cantidad de series de la captura rápida (1 a 20). */
@@ -218,7 +219,12 @@ export function buildQuickSets(
   const weightText = weightToInput(weight.value);
   return {
     ok: true,
-    sets: Array.from({ length: count.value }, () => ({ key: newKey(), reps: String(reps.value), weight: weightText })),
+    sets: Array.from({ length: count.value }, () => ({
+      key: newKey(),
+      reps: String(reps.value),
+      weight: weightText,
+      ...(input.bar ? { bar: true } : {}),
+    })),
   };
 }
 
@@ -250,7 +256,7 @@ export function exerciseSummary(sets: DraftSet[]): { count: number; text: string
     if (isSetBlank(set)) continue;
     const reps = parseReps(set.reps);
     const weight = parseWeight(set.weight);
-    if (reps.ok && weight.ok) valid.push({ reps: reps.value, weight_kg: weight.value });
+    if (reps.ok && weight.ok) valid.push({ reps: reps.value, weight_kg: weight.value, ...(set.bar ? { bar_only: true } : {}) });
     else incomplete = true;
   }
   if (valid.length === 0) return { count: 0, text: "Sin series registradas", best: null, incomplete };
@@ -273,7 +279,7 @@ export function nextSet(sets: DraftSet[]): DraftSet {
   const last = sets.at(-1);
   // Si la última es por bloques, se repite su secuencia (pesos y ciclos incluidos).
   if (last?.blocks) return { key: newKey(), reps: "", weight: "", blocks: cloneBlocks(last.blocks) };
-  return { key: newKey(), reps: last?.reps ?? "", weight: last?.weight ?? "" };
+  return { key: newKey(), reps: last?.reps ?? "", weight: last?.weight ?? "", ...(last?.bar ? { bar: true } : {}) };
 }
 
 // --- Persistencia local (localStorage) -------------------------------------

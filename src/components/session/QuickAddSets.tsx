@@ -9,7 +9,7 @@ type Props = {
   exerciseKey: string;
   exerciseName: string;
   /** Valores iniciales de reps y peso (p. ej., los de la última serie). */
-  defaults?: { reps: string; weight: string };
+  defaults?: { reps: string; weight: string; bar?: boolean };
   onAdd: (sets: DraftSet[]) => void;
   onCancel?: () => void;
 };
@@ -25,6 +25,7 @@ export function QuickAddSets({ exerciseKey, exerciseName, defaults, onAdd, onCan
   const [count, setCount] = useState(DEFAULT_QUICK_COUNT);
   const [reps, setReps] = useState(defaults?.reps ?? "");
   const [weight, setWeight] = useState(defaults?.weight ?? "");
+  const [bar, setBar] = useState(Boolean(defaults?.bar));
   const [errors, setErrors] = useState<QuickAddErrors>({});
 
   const parsedCount = parseSetCount(count);
@@ -33,7 +34,7 @@ export function QuickAddSets({ exerciseKey, exerciseName, defaults, onAdd, onCan
     : "Agregar series";
 
   function submit() {
-    const res = buildQuickSets({ count, reps, weight });
+    const res = buildQuickSets({ count, reps, weight, bar });
     if (!res.ok) {
       setErrors(res.errors);
       return;
@@ -92,7 +93,7 @@ export function QuickAddSets({ exerciseKey, exerciseName, defaults, onAdd, onCan
             className="input"
             inputMode="decimal"
             autoComplete="off"
-            placeholder="—"
+            placeholder={bar ? "barra" : "—"}
             aria-label={`Peso por serie de ${exerciseName} (kg, vacío si es peso corporal)`}
             aria-invalid={errors.weight ? true : undefined}
             value={weight}
@@ -100,6 +101,15 @@ export function QuickAddSets({ exerciseKey, exerciseName, defaults, onAdd, onCan
             onKeyDown={onKeyDown}
             enterKeyHint="done"
           />
+          <button
+            type="button"
+            className="bar-toggle"
+            aria-pressed={bar}
+            aria-label={`Solo barra en las series de ${exerciseName}`}
+            onClick={() => setBar((b) => !b)}
+          >
+            Solo barra
+          </button>
         </label>
       </div>
       {errorList.length ? (

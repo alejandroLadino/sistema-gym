@@ -29,7 +29,8 @@ function isValidPayload(p: SessionPayload): boolean {
         // Serie por bloques (secuencia + ciclos) o serie simple.
         s.blocks != null
           ? isValidBlockSet(s)
-          : Number.isInteger(s.reps) &&
+          : (s.bar_only === undefined || typeof s.bar_only === "boolean") &&
+            Number.isInteger(s.reps) &&
             (s.reps as number) >= 1 &&
             (s.reps as number) <= MAX_REPS &&
             (s.weight_kg === null ||

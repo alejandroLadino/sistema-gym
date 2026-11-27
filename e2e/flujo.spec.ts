@@ -2191,6 +2191,157 @@ test("Reordenar ejercicios: arrastre táctil y con mouse, menú, cancelación, s
   await desk.close();
 });
 
+test("Solo barra: series simples y por bloques, recarga, Progreso, peso posterior y copia (375 px)", async ({ browser }) => {
+  const userL = { email: `lia.${run}@example.com`, temp: "Temporal357", final: "LiaSegura951" };
+  const admin = await newPage(browser);
+  await login(admin, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await admin.goto("/admin");
+  const form = admin.getByRole("form", { name: "Crear cuenta" });
+  await form.getByLabel("Correo").fill(userL.email);
+  await form.getByLabel("Contraseña inicial").fill(userL.temp);
+  await form.getByRole("button", { name: "Crear cuenta" }).click();
+  await expect(form.getByText(`Cuenta creada para ${userL.email}`)).toBeVisible();
+  await admin.context().close();
+
+  const context = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  page.on("dialog", (d) => d.accept());
+  await login(page, userL.email, userL.temp);
+  await page.getByLabel("Nueva contraseña", { exact: true }).fill(userL.final);
+  await page.getByLabel("Repite la nueva contraseña").fill(userL.final);
+  await page.getByRole("button", { name: "Guardar contraseña" }).click();
+  await expect(page).toHaveURL(/\/$/);
+
+  const PRESS = "Press barra L";
+  const REMO = "Remo barra L";
+  const CURL = "Curl barra L";
+  const barra = (name: string, n: number) => page.getByRole("button", { name: `Solo barra serie ${n} de ${name}` });
+
+  // Serie simple: 10 reps solo con barra (peso vacío) + una serie normal de 40 kg × 8.
+  await page.goto("/entrenar");
+  await addExercise(page, PRESS, { create: true, muscle: "Pecho" });
+  let card = page.getByRole("region", { name: PRESS });
+  await card.getByLabel(`Cantidad de series de ${PRESS}`).fill("1");
+  await card.getByLabel(`Repeticiones por serie de ${PRESS}`).fill("10");
+  await card.getByRole("button", { name: `Solo barra en las series de ${PRESS}` }).click();
+  await card.getByRole("button", { name: "Agregar 1 serie" }).click();
+  await expect(barra(PRESS, 1)).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel(`Peso serie 1 de ${PRESS}`, { exact: false })).toHaveValue("");
+  await card.getByRole("button", { name: "Agregar serie", exact: true }).click(); // copia la anterior (con barra)
+  await expect(barra(PRESS, 2)).toHaveAttribute("aria-pressed", "true");
+  await barra(PRESS, 2).click();
+  await setSet(page, PRESS, 2, "40", "8");
+  await expect(barra(PRESS, 2)).toHaveCount(0); // con peso y sin marca, el interruptor se oculta
+
+  // Por bloques: 7 reps con 30 kg → 7 reps solo barra.
+  await addExercise(page, REMO, { create: true, muscle: "Espalda" });
+  await page.getByRole("region", { name: REMO }).getByRole("button", { name: "Agregar serie por bloques" }).click();
+  const sheet = page.getByRole("dialog", { name: "Serie por bloques" });
+  await sheet.getByRole("button", { name: "Agregar paso de repeticiones" }).click();
+  await sheet.getByLabel("Repeticiones del paso 1").fill("7");
+  await sheet.getByLabel("Peso del paso 1", { exact: false }).fill("30");
+  await sheet.getByRole("button", { name: "Agregar paso de repeticiones" }).click();
+  await sheet.getByLabel("Peso del paso 2", { exact: false }).fill("");
+  await sheet.getByRole("button", { name: "Solo barra en el paso 2" }).click();
+  await expect(sheet.locator(".step-text")).toHaveText(["1 · 7 reps a 30 kg", "2 · 7 reps · solo barra"]);
+  await shot(page, "22a-bloques-solo-barra");
+  await sheet.getByRole("button", { name: "Agregar 1 serie" }).click();
+  await expect(page.getByRole("region", { name: REMO }).locator(".block-set-text")).toHaveText("7 reps a 30 kg → 7 reps · solo barra");
+
+  // Un ejercicio registrado solo con barra (sin peso conocido).
+  await addExercise(page, CURL, { create: true, muscle: "Bíceps" });
+  card = page.getByRole("region", { name: CURL });
+  await card.getByLabel(`Cantidad de series de ${CURL}`).fill("2");
+  await card.getByLabel(`Repeticiones por serie de ${CURL}`).fill("12");
+  await card.getByRole("button", { name: `Solo barra en las series de ${CURL}` }).click();
+  await card.getByRole("button", { name: "Agregar 2 series" }).click();
+  await saved(page);
+  const sesion = page.url().split("/").pop()!;
+  await shot(page, "22b-series-solo-barra");
+
+  // Recargar: ambas conservan su registro.
+  await page.reload();
+  await expand(page, PRESS);
+  await expect(barra(PRESS, 1)).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel(`Peso serie 1 de ${PRESS}`, { exact: false })).toHaveValue("");
+  await expect(page.getByLabel(`Repeticiones serie 1 de ${PRESS}`)).toHaveValue("10");
+  await expect(page.getByLabel(`Peso serie 2 de ${PRESS}`, { exact: false })).toHaveValue("40");
+  await expect(page.getByRole("region", { name: PRESS }).locator(".ex-summary")).toHaveCount(1);
+  await expand(page, REMO);
+  const remoSerie = page.getByRole("region", { name: REMO }).locator(".set-row-blocks").first();
+  await expect(remoSerie.locator(".block-set-totals")).toHaveText("Serie 1 · 14 reps · a 30 kg");
+  await remoSerie.locator("summary").click();
+  await expect(remoSerie.locator(".block-set-list li")).toHaveText(["1 · 7 reps a 30 kg", "2 · 7 reps · solo barra", "Vueltas por serie: 1"]);
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial/);
+
+  // Progreso: cuenta series y reps; la carga desconocida queda fuera del máximo; no es peso corporal.
+  const progreso = async (name: string) => {
+    await page.goto("/progreso");
+    await page.getByRole("list", { name: "Ejercicios con registros" }).locator("li").filter({ hasText: name }).getByRole("link").click();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+  };
+  await progreso(PRESS);
+  await expect(page.locator(".progress-detail")).toContainText("Con peso");
+  let item = page.locator(".history-item").first();
+  await expect(item.locator(".history-sets > li")).toHaveText(["Solo barra × 10", "40 kg × 8"]);
+  await expect(item).toContainText("Máx. 40 kg × 8 · 18 reps totales · 2 series");
+  await progreso(REMO);
+  await expect(page.locator(".history-item").first()).toContainText("Máx. 30 kg × 7 · 14 reps totales · 1 serie");
+  await progreso(CURL);
+  await expect(page.locator(".progress-detail")).toContainText("Con peso");
+  await expect(page.locator(".progress-detail")).not.toContainText("Peso corporal");
+  await expect(page.locator(".history-item").first()).toContainText("24 reps totales · 2 series");
+  await expect(page.locator(".history-item").first()).not.toContainText("Máx.");
+  await shot(page, "22c-progreso-solo-barra");
+
+  // Más tarde: el peso real de la barra (45 kg) en una sola serie; conserva la etiqueta y entra en Progreso.
+  await page.goto(`/sesiones/${sesion}`);
+  await expand(page, PRESS);
+  await page.getByLabel(`Peso serie 1 de ${PRESS}`, { exact: false }).fill("45");
+  await expect(barra(PRESS, 1)).toHaveAttribute("aria-pressed", "true");
+  // Y el de un bloque concreto (paso 2 de Remo: 25 kg).
+  await expand(page, REMO);
+  await page.getByRole("region", { name: REMO }).locator(".set-row-blocks").first().locator("summary").click();
+  await page.getByRole("button", { name: `Editar serie 1 de ${REMO}` }).click();
+  const editar = page.getByRole("dialog", { name: "Editar serie 1" });
+  await editar.getByRole("button", { name: /^Paso 2:/ }).click();
+  await editar.getByLabel("Peso del paso 2", { exact: false }).fill("25");
+  await expect(editar.getByRole("button", { name: "Solo barra en el paso 2" })).toHaveAttribute("aria-pressed", "true");
+  await editar.getByRole("button", { name: "Guardar cambios" }).click();
+  await saved(page);
+  await page.reload();
+  await expand(page, PRESS);
+  await expect(page.getByLabel(`Peso serie 1 de ${PRESS}`, { exact: false })).toHaveValue("45");
+  await expect(barra(PRESS, 1)).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel(`Peso serie 2 de ${PRESS}`, { exact: false })).toHaveValue("40");
+  await progreso(PRESS);
+  item = page.locator(".history-item").first();
+  await expect(item.locator(".history-sets > li")).toHaveText(["Solo barra (45 kg) × 10", "40 kg × 8"]);
+  await expect(item).toContainText("Máx. 45 kg × 10 · 18 reps totales · 2 series");
+  await page.goto("/progreso");
+  await expect(page.getByRole("list", { name: "Ejercicios con registros" }).locator("li").filter({ hasText: PRESS })).toContainText("45 kg × 10");
+  await progreso(REMO);
+  await page.locator(".history-item").first().locator("summary").click();
+  await expect(page.locator(".history-item").first()).toContainText("2 · 7 reps · solo barra (25 kg)");
+  await expect(page.locator(".history-item").first()).toContainText("1 · 7 reps a 30 kg");
+
+  // «Última vez» y «Copiar última sesión» conservan la marca (sesión de mañana).
+  await page.goto("/entrenar");
+  await page.getByLabel("Fecha del entrenamiento").fill(isoDaysAgo(-1));
+  await addExercise(page, CURL);
+  card = page.getByRole("region", { name: CURL });
+  await expect(card.locator(".previous-summary")).toHaveText("2 × 12 · solo barra");
+  await card.getByRole("button", { name: "Copiar última sesión" }).click();
+  await expect(barra(CURL, 1)).toHaveAttribute("aria-pressed", "true");
+  await expect(barra(CURL, 2)).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel(`Repeticiones serie 2 de ${CURL}`)).toHaveValue("12");
+  await addExercise(page, REMO);
+  await page.getByRole("region", { name: REMO }).getByRole("button", { name: "Copiar última sesión" }).click();
+  await expect(page.getByRole("region", { name: REMO }).locator(".block-set-text")).toHaveText("7 reps a 30 kg → 7 reps · solo barra (25 kg)");
+  await context.close();
+});
+
 test("cuenta B no accede a los datos de A, ni por URL directa", async ({ browser }) => {
   const page = await newPage(browser);
   await login(page, userB.email, userB.temp);

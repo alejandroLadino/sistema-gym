@@ -54,6 +54,10 @@ export { formatKg };
 /** "40 kg × 12", "12 reps" (peso corporal) o la secuencia de una serie por bloques. */
 export function formatSet(set: SetValue): string {
   if (isBlockSet(set)) return formatSequence(set.blocks, set.rounds ?? 1);
+  if (set.bar_only) {
+    const w = set.weight_kg === null || set.weight_kg === undefined ? null : Number(set.weight_kg);
+    return w === null ? `Solo barra × ${set.reps}` : `Solo barra (${formatKg(w)} kg) × ${set.reps}`;
+  }
   if (set.weight_kg === null || set.weight_kg === undefined) return `${set.reps} reps`;
   return `${formatKg(Number(set.weight_kg))} kg × ${set.reps}`;
 }
@@ -74,7 +78,7 @@ export function summarizeSets(sets: SetValue[]): string {
     const w = set.weight_kg === null || set.weight_kg === undefined ? null : Number(set.weight_kg);
     const normalized: SetValue = isBlockSet(set)
       ? { reps: null, weight_kg: null, rounds: set.rounds ?? 1, blocks: set.blocks }
-      : { reps: set.reps, weight_kg: w };
+      : { reps: set.reps, weight_kg: w, ...(set.bar_only ? { bar_only: true } : {}) };
     const key = JSON.stringify(normalized);
     const last = groups.at(-1);
     if (last && last.key === key) last.count += 1;
@@ -84,6 +88,7 @@ export function summarizeSets(sets: SetValue[]): string {
     .map(({ set, count }) => {
       if (count === 1) return formatSet(set);
       if (isBlockSet(set)) return `${count} series: ${formatSet(set)}`;
+      if (set.bar_only) return `${count} × ${set.reps} · solo barra${set.weight_kg === null ? "" : ` (${formatKg(set.weight_kg)} kg)`}`;
       if (set.weight_kg === null) return `${count} × ${set.reps} reps`;
       return `${count} × ${set.reps} a ${formatKg(set.weight_kg)} kg`;
     })

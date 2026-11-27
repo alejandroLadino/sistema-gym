@@ -719,6 +719,69 @@ delete from public.exercises where id in ('e0000000-0000-0000-0000-00000000000d'
 reset role;
 \echo '   Series por bloques (métricas, Última vez, corrección, validación, compatibilidad, rutinas): OK'
 
+-- «Solo barra» ----------------------------------------------------------------------------
+select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+insert into public.exercises (id, name, muscle_group_id) values
+  ('e0000000-0000-0000-0000-00000000000f', 'Press con barra', 'pecho'),
+  ('e0000000-0000-0000-0000-000000000010', 'Curl con barra', 'biceps');
+do $$
+declare r record; j jsonb; ok boolean;
+  bloque jsonb := '{"rounds": 1, "blocks": [{"type": "reps", "reps": 7, "weight_kg": 30}, {"type": "reps", "reps": 7, "weight_kg": null, "bar_only": true}, {"type": "hold", "seconds": 7, "weight_kg": null, "bar_only": true}]}';
+begin
+  perform public.save_workout_session(jsonb_build_object('id', '50000000-0000-0000-0000-000000000016', 'session_date', '2026-11-27',
+    'exercises', jsonb_build_array(
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-00000000000f', 'sets', jsonb_build_array(
+        '{"reps": 10, "weight_kg": null, "bar_only": true}'::jsonb, '{"reps": 8, "weight_kg": 40}'::jsonb, bloque)),
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-000000000010', 'sets', jsonb_build_array(
+        '{"reps": 10, "weight_kg": null, "bar_only": true}'::jsonb)))));
+
+  -- Se guarda la marca; el peso desconocido queda null; las series sin barra no cambian su JSON.
+  j := public.get_workout_session('50000000-0000-0000-0000-000000000016') -> 'exercises' -> 0 -> 'sets';
+  assert j -> 0 = '{"reps": 10, "weight_kg": null, "bar_only": true}'::jsonb, format('Serie con barra: %s', j -> 0);
+  assert j -> 1 = '{"reps": 8, "weight_kg": 40.00}'::jsonb, format('Serie normal sin cambios: %s', j -> 1);
+  assert j -> 2 -> 'blocks' = bloque -> 'blocks', format('Bloques con barra: %s', j -> 2);
+
+  -- Progreso: cuenta series y reps; la carga desconocida no entra en el máximo.
+  select * into r from public.get_exercise_progress('e0000000-0000-0000-0000-00000000000f', null, null);
+  assert jsonb_array_length(r.sets) = 3 and r.total_reps = 32 and r.max_weight_kg = 40, format('Progreso con barra: %s', row_to_json(r));
+  -- Solo barra (sin peso) no lo clasifica como peso corporal.
+  select * into r from public.get_progress_overview() where exercise_id = 'e0000000-0000-0000-0000-000000000010';
+  assert r.uses_weight and r.session_count = 1, format('Curl con barra es con peso: %s', row_to_json(r));
+  select * into r from public.get_exercise_progress('e0000000-0000-0000-0000-000000000010', null, null);
+  assert r.total_reps = 10 and r.max_weight_kg is null, 'Sin peso conocido no hay máximo';
+  -- «Última vez» conserva la marca.
+  select * into r from public.get_previous_exercise_sets(array['e0000000-0000-0000-0000-00000000000f']::uuid[], '2026-11-28', null);
+  assert (r.sets -> 0 ->> 'bar_only')::boolean and (r.sets -> 2 -> 'blocks' -> 1 ->> 'bar_only')::boolean, 'Última vez con barra';
+
+  -- Más tarde se registra el peso real de la barra (45 kg) conservando la etiqueta: entra en el máximo.
+  perform public.save_workout_session(jsonb_build_object('id', '50000000-0000-0000-0000-000000000016', 'session_date', '2026-11-27',
+    'exercises', jsonb_build_array(
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-00000000000f', 'sets', jsonb_build_array(
+        '{"reps": 10, "weight_kg": 45, "bar_only": true}'::jsonb, '{"reps": 8, "weight_kg": 40}'::jsonb, bloque)),
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-000000000010', 'sets', jsonb_build_array(
+        '{"reps": 10, "weight_kg": null, "bar_only": true}'::jsonb)))));
+  select * into r from public.get_exercise_progress('e0000000-0000-0000-0000-00000000000f', null, null);
+  assert r.max_weight_kg = 45 and r.sets -> 0 = '{"reps": 10, "weight_kg": 45.00, "bar_only": true}'::jsonb
+         and r.sets -> 1 = '{"reps": 8, "weight_kg": 40.00}'::jsonb, format('Peso real de la barra: %s', row_to_json(r));
+  select recent -> 0 -> 'best_set' into j from public.get_progress_overview() where exercise_id = 'e0000000-0000-0000-0000-00000000000f';
+  assert j = '{"reps": 10, "weight_kg": 45, "bar_only": true}'::jsonb, format('Mejor serie con barra: %s', j);
+
+  -- Validación: bar_only debe ser booleano.
+  ok := false;
+  begin
+    perform public.save_workout_session(jsonb_build_object('id', '50000000-0000-0000-0000-000000000017', 'session_date', '2026-11-27',
+      'exercises', jsonb_build_array(jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-00000000000f', 'sets', jsonb_build_array(
+        '{"rounds": 1, "blocks": [{"type": "reps", "reps": 7, "bar_only": "sí"}]}'::jsonb)))));
+  exception when check_violation then ok := true;
+  end;
+  assert ok, 'bar_only inválido rechazado';
+end $$;
+delete from public.workout_sessions where id = '50000000-0000-0000-0000-000000000016';
+delete from public.exercises where id in ('e0000000-0000-0000-0000-00000000000f', 'e0000000-0000-0000-0000-000000000010');
+reset role;
+\echo '   Solo barra (guardado, compatibilidad, Progreso, clasificación, peso posterior): OK'
+
 select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
 set role authenticated;
 do $$

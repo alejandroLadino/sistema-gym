@@ -29,7 +29,14 @@ export type Exercise = {
  * Serie simple (reps y peso opcional) o por bloques (`blocks` + `rounds`; entonces
  * `reps` y `weight_kg` son null).
  */
-export type SetValue = { reps: number | null; weight_kg: number | null; rounds?: number | null; blocks?: Block[] | null };
+export type SetValue = {
+  reps: number | null;
+  weight_kg: number | null;
+  rounds?: number | null;
+  blocks?: Block[] | null;
+  /** «Solo barra» (series simples): distingue la barra de peso corporal o de un peso sin capturar. */
+  bar_only?: boolean;
+};
 
 export type SessionData = {
   id: string;
