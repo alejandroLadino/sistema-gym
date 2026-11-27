@@ -20,6 +20,7 @@ import {
   readNewPointer,
   readStoredDraft,
   removeStoredDraft,
+  resolveStoredDraft,
   sessionToDraft,
   writeNewPointer,
   writeStoredDraft,
@@ -72,6 +73,13 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
   const [prevError, setPrevError] = useState(false);
   /** Captura rápida abierta en ejercicios que ya tienen series (en los vacíos siempre se muestra). */
   const [quickOpen, setQuickOpen] = useState<Record<string, boolean>>({});
+  /** Copia local vacía que contradice la sesión finalizada guardada (se muestra la del servidor). */
+  const [localConflict, setLocalConflict] = useState(false);
+  /** Diálogo al quitar el único ejercicio de una sesión finalizada. */
+  const [lastExercise, setLastExercise] = useState<DraftExercise | null>(null);
+  /** Ejercicio que se reemplaza con el selector (null = el selector agrega). */
+  const [replaceTarget, setReplaceTarget] = useState<DraftExercise | null>(null);
+  const [deleting, setDeleting] = useState(false);
   /** Ejercicios colapsados (solo muestran nombre y resumen). */
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
@@ -97,13 +105,16 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
     let pending = false;
     if (initial) {
       const stored = readStoredDraft(initial.id, userId);
-      if (stored?.dirty && stored.draft.editedAt > Date.parse(initial.updated_at)) {
+      const source = resolveStoredDraft(initial, stored);
+      if (source === "local" && stored) {
         loaded = stored.draft;
         pending = true;
         setNotice("Recuperamos cambios que no se habían guardado en este dispositivo.");
       } else {
         loaded = sessionToDraft(initial);
-        if (stored) removeStoredDraft(initial.id);
+        // La copia en conflicto se conserva hasta que la persona la descarte.
+        if (source === "conflict") setLocalConflict(true);
+        else if (stored) removeStoredDraft(initial.id);
       }
     } else {
       const pointer = readNewPointer(userId);
@@ -137,6 +148,12 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
       if (timer.current) clearTimeout(timer.current);
       if (inFlight.current) {
         queued.current = true;
+        return false;
+      }
+      // Una sesión nueva sin ejercicios no se crea en el servidor; una ya guardada
+      // (en curso) sí puede quedar vacía.
+      if (!savedOnce.current && current.exercises.length === 0) {
+        setStatus("empty");
         return false;
       }
       const result = draftToPayload(current);
@@ -197,6 +214,10 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
     writeStoredDraft({ draft, dirty: true, savedOnce: savedOnce.current, ownerId: userId });
     if (!savedOnce.current) writeNewPointer(draft.id, userId);
 
+    if (!savedOnce.current && draft.exercises.length === 0) {
+      setStatus("empty");
+      return;
+    }
     const check = draftToPayload(draft);
     if (!check.ok) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- refleja la validación del borrador
@@ -278,6 +299,27 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
     }));
   };
 
+  /** Reemplaza un ejercicio (sesión finalizada): el nuevo ocupa su lugar, sin series. */
+  const replaceExercise = (target: DraftExercise, exercise: Exercise) => {
+    setPickerOpen(false);
+    setReplaceTarget(null);
+    if (target.exerciseId === exercise.id) return;
+    const key = newKey();
+    scrollTarget.current = key;
+    setCollapsed((c) => ({ ...c, [key]: false }));
+    update((d) => ({
+      ...d,
+      exercises: d.exercises.map((e) =>
+        e.key === target.key ? { key, exerciseId: exercise.id, name: exercise.name, sets: [] } : e,
+      ),
+    }));
+  };
+
+  const closePicker = () => {
+    setPickerOpen(false);
+    setReplaceTarget(null); // cancelar el reemplazo deja la sesión intacta
+  };
+
   // Lleva a la vista la tarjeta recién agregada si quedó fuera de pantalla (sin abrir el teclado).
   useEffect(() => {
     const key = scrollTarget.current;
@@ -300,6 +342,11 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
 
   /** Quita el ejercicio solo de esta sesión (sigue en el catálogo y en otras sesiones). */
   const removeExercise = (ex: DraftExercise) => {
+    // Sesión finalizada: no puede quedar vacía. Se pregunta ANTES de tocar el borrador.
+    if (finished && (draftRef.current?.exercises.length ?? 0) <= 1) {
+      setLastExercise(ex);
+      return;
+    }
     const n = exerciseSummary(ex.sets).count;
     if (
       n > 0 &&
@@ -347,6 +394,11 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
       return;
     }
     if (finishing) return;
+    if (draft.exercises.length === 0) {
+      setErrorMsg("Agrega al menos un ejercicio para finalizar la sesión.");
+      setShowErrors(true);
+      return;
+    }
     if (revision.current !== savedRevision.current || status === "error") {
       const ok = await save(true);
       if (!ok) return;
@@ -383,15 +435,39 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
     router.push("/");
   }
 
+  /** Elimina la sesión; el éxito solo se muestra cuando el servidor lo confirma. */
   async function remove() {
-    if (!draft || !window.confirm("¿Eliminar esta sesión? No se puede deshacer.")) return;
+    if (!draft || deleting || !window.confirm("¿Eliminar esta sesión? No se puede deshacer.")) return;
+    setLastExercise(null);
+    setDeleting(true);
+    // Mientras tanto no se autoguarda (no debe recrearla).
     blocked.current = true;
     if (timer.current) clearTimeout(timer.current);
+    let ok = false;
+    try {
+      const res = await deleteSession(draft.id);
+      ok = res.ok;
+      if (!res.ok) setErrorMsg(res.error);
+    } catch {
+      setErrorMsg("Sin conexión con el servidor. La sesión no se eliminó; reintenta.");
+    }
+    if (!ok) {
+      blocked.current = false;
+      setShowErrors(true);
+      setDeleting(false);
+      return;
+    }
     removeStoredDraft(draft.id);
     clearNewPointer(draft.id);
-    const fd = new FormData();
-    fd.set("id", draft.id);
-    await deleteSession(fd);
+    const href = historyHref();
+    router.push(`${href}${href.includes("?") ? "&" : "?"}eliminada=1`);
+  }
+
+  function discardLocalCopy() {
+    if (!draft) return;
+    removeStoredDraft(draft.id);
+    setLocalConflict(false);
+    setNotice("Copia local descartada. Esta es la versión guardada de la sesión.");
   }
 
   if (!draft) {
@@ -451,6 +527,17 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
 
       <div className="stack">
         {notice ? <p className="alert alert-info" role="status">{notice}</p> : null}
+        {localConflict ? (
+          <div className="alert alert-warning stack" role="status" style={{ gap: 8 }}>
+            <p style={{ margin: 0 }}>
+              En este dispositivo había una copia sin ejercicios que no coincide con esta sesión finalizada. Se muestra la
+              versión guardada.
+            </p>
+            <button type="button" className="btn btn-sm" onClick={discardLocalCopy}>
+              Descartar copia local
+            </button>
+          </div>
+        ) : null}
         {status === "error" && errorMsg ? (
           <p className="alert alert-error" role="alert">
             {errorMsg} Tus datos siguen aquí; pulsa «Reintentar».
@@ -615,20 +702,57 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
           {isNew ? (
             <button type="button" className="btn btn-ghost" onClick={discard}>Descartar</button>
           ) : (
-            <button type="button" className="btn btn-danger" onClick={remove}>
-              <IconTrash /> Eliminar sesión
+            <button type="button" className="btn btn-danger" onClick={() => void remove()} disabled={deleting}>
+              <IconTrash /> {deleting ? "Eliminando…" : "Eliminar sesión"}
             </button>
           )}
         </div>
       </div>
+
+      {lastExercise ? (
+        <div className="sheet-backdrop" onClick={() => setLastExercise(null)}>
+          <div
+            className="sheet stack"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ultimo-ejercicio-titulo"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="ultimo-ejercicio-titulo" style={{ margin: 0 }}>Esta sesión necesita al menos un ejercicio</h2>
+            <p className="muted" style={{ margin: 0 }}>
+              La sesión está finalizada y «{lastExercise.name}» es su único ejercicio. Puedes reemplazarlo por otro o
+              eliminar la sesión completa.
+            </p>
+            <button
+              type="button"
+              className="btn btn-primary btn-block"
+              onClick={() => {
+                setReplaceTarget(lastExercise);
+                setLastExercise(null);
+                setPickerOpen(true);
+              }}
+            >
+              Reemplazar ejercicio
+            </button>
+            <button type="button" className="btn btn-danger btn-block" onClick={() => void remove()} disabled={deleting}>
+              {deleting ? "Eliminando…" : "Eliminar sesión"}
+            </button>
+            <button type="button" className="btn btn-ghost btn-block" onClick={() => setLastExercise(null)}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {pickerOpen ? (
         <ExercisePicker
           exercises={catalog}
           muscleGroups={muscleGroups}
           inSession={inSession}
-          onClose={() => setPickerOpen(false)}
-          onPick={addExercise}
+          title={replaceTarget ? "Reemplazar ejercicio" : undefined}
+          notice={replaceTarget ? replaceNotice(replaceTarget) : undefined}
+          onClose={closePicker}
+          onPick={(exercise) => (replaceTarget ? replaceExercise(replaceTarget, exercise) : addExercise(exercise))}
           onCreated={(exercise) => setCatalog((c) => (c.some((x) => x.id === exercise.id) ? c : [...c, exercise]))}
         />
       ) : null}
@@ -673,4 +797,10 @@ function PreviousSummary({
       ) : null}
     </div>
   );
+}
+
+function replaceNotice(ex: DraftExercise): string {
+  const n = exerciseSummary(ex.sets).count;
+  const series = n === 0 ? "" : ` y sus ${n} ${n === 1 ? "serie registrada" : "series registradas"}`;
+  return `Elige el ejercicio que ocupará el lugar de «${ex.name}». Se quitará «${ex.name}»${series} de esta sesión; seguirá en tu catálogo y en tus otras sesiones.`;
 }

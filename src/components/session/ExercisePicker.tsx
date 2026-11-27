@@ -26,9 +26,13 @@ type Props = {
   /** Un ejercicio nuevo ya quedó en el catálogo personal. */
   onCreated: (exercise: Exercise) => void;
   onClose: () => void;
+  /** Título de la lista (por defecto «Agregar ejercicio»; p. ej., «Reemplazar ejercicio»). */
+  title?: string;
+  /** Aclaración bajo el título (p. ej., qué se quitará al reemplazar). */
+  notice?: string;
 };
 
-export function ExercisePicker({ exercises, muscleGroups, inSession, onPick, onCreated, onClose }: Props) {
+export function ExercisePicker({ exercises, muscleGroups, inSession, onPick, onCreated, onClose, title, notice }: Props) {
   const [view, setView] = useState<"list" | "create">("list");
   // Filtro y búsqueda se conservan al volver del formulario de creación.
   const [group, setGroup] = useState<string>(ALL);
@@ -89,10 +93,11 @@ export function ExercisePicker({ exercises, muscleGroups, inSession, onPick, onC
       >
         <div className="row between picker-head">
           <h2 id="picker-title" ref={titleRef} tabIndex={-1}>
-            {view === "list" ? "Agregar ejercicio" : "Crear ejercicio"}
+            {view === "list" ? (title ?? "Agregar ejercicio") : "Crear ejercicio"}
           </h2>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Cerrar</button>
         </div>
+        {notice ? <p className="alert alert-warning" style={{ margin: 0, flex: "none" }}>{notice}</p> : null}
 
         {view === "list" ? (
           <>
