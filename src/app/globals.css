@@ -262,7 +262,8 @@ input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
   margin-top: 12px; padding: 12px; border-radius: 12px; display: grid; gap: 8px;
   background: var(--primary-soft); border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
 }
-.quick-add-fields { display: grid; grid-template-columns: 0.8fr 1fr 1.2fr; gap: 8px; }
+.quick-add-fields { display: grid; grid-template-columns: 0.8fr 1fr 1.2fr; gap: 8px; align-items: end; }
+.quick-add-fields[data-cols="2"] { grid-template-columns: 1fr 1fr; }
 .quick-add-fields .field > span { font-size: 0.8rem; }
 .quick-add-fields .input { text-align: center; font-size: 1.1rem; font-weight: 700; min-height: 48px; padding: 6px 8px; }
 .quick-add-hint, .quick-add-error { margin: 0; font-size: 0.82rem; }
@@ -715,7 +716,6 @@ html:has(.session-head) { scroll-padding-top: 124px; }
 .step-chevron { display: inline-flex; color: var(--muted); transition: transform 0.15s ease; }
 .step-chevron svg { width: 18px; height: 18px; }
 .step[data-open] .step-chevron { transform: rotate(180deg); }
-.step-edit { display: grid; grid-template-columns: 1fr 1fr var(--tap); gap: 8px; align-items: end; padding: 0 10px 10px; }
 .step-edit .input { text-align: center; font-size: 1.1rem; font-weight: 700; }
 .step-error { margin: 0; padding: 0 10px 8px; }
 .step-add { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -745,19 +745,51 @@ html:has(.session-head) { scroll-padding-top: 124px; }
 }
 html.is-dragging-card, html.is-dragging-card * { -webkit-user-select: none; user-select: none; cursor: grabbing; }
 
-/* --- «Solo barra» -------------------------------------------------------------- */
-.weight-cell { display: grid; gap: 4px; min-width: 0; }
-.set-row:has(.weight-cell .bar-toggle) { align-items: start; }
-.set-row:has(.weight-cell .bar-toggle) .num { padding-top: 13px; }
-.bar-toggle {
-  min-height: 32px; padding: 0 8px; border-radius: 999px; border: 1px dashed var(--border);
-  background: transparent; color: var(--muted); font: inherit; font-size: 0.78rem; font-weight: 700;
-  white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+/* --- Carga: «Con peso», «Solo barra», «Peso corporal» -------------------------- */
+.load-picker-wrap { display: grid; gap: 4px; }
+.load-picker-title { font-size: 0.8rem; font-weight: 700; color: var(--muted); }
+.load-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 3px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); }
+.load-option {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 40px; padding: 0 4px;
+  border: 0; border-radius: 9px; background: transparent; color: var(--muted);
+  font: inherit; font-size: 0.82rem; font-weight: 700; line-height: 1.1; text-align: center; cursor: pointer;
+  -webkit-tap-highlight-color: transparent; transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
-.bar-toggle[aria-pressed="true"] { border-style: solid; border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
-.bar-toggle[aria-pressed="true"]::before { content: "✓ "; }
-.bar-toggle:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 1px; }
-.quick-add .bar-toggle, .step-edit .bar-toggle { justify-self: start; }
-.step-edit { align-items: start; }
-.step-edit > .btn-icon { margin-top: 26px; }
+.load-option svg { width: 14px; height: 14px; flex: none; }
+/* Elegida: azul eléctrico con ✓ (no depende solo del color). */
+.load-option[aria-checked="true"] { background: var(--primary); color: var(--primary-text); box-shadow: var(--shadow); }
+.load-option:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 1px; }
+.bar-weight-add {
+  justify-self: start; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 4px;
+  border: 0; background: none; color: var(--primary); font: inherit; font-size: 0.9rem; font-weight: 700; cursor: pointer;
+}
+.bar-weight-add svg { width: 16px; height: 16px; }
+.bar-weight-field .input { max-width: 160px; text-align: center; font-weight: 700; }
+
+/* Fila de serie: celda de carga del mismo alto que Reps */
+.load-input { position: relative; min-width: 0; }
+.load-input .input { width: 100%; padding-right: 34px; }
+.load-mode-btn {
+  position: absolute; top: 4px; right: 4px; bottom: 4px; width: 30px; padding: 0; border: 0; border-radius: 8px;
+  background: var(--surface-2); color: var(--muted); font: inherit; font-size: 0.72rem; font-weight: 800; cursor: pointer;
+}
+.load-mode-btn[aria-expanded="true"] { background: var(--primary-soft); color: var(--primary); }
+.load-chip {
+  min-height: 48px; min-width: 0; padding: 0 6px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 0.9rem; font-weight: 750;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.load-chip[data-mode="bar"] { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); color: var(--primary); }
+.load-chip[aria-expanded="true"] { outline: 2px solid color-mix(in srgb, var(--primary) 40%, transparent); }
+.load-editor {
+  display: grid; gap: 8px; margin: 6px 0 4px 46px; padding: 10px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--surface-2);
+}
+.load-editor > .btn { justify-self: end; }
+
+/* Paso de una serie por bloques */
+.step-edit { display: grid; gap: 8px; padding: 0 10px 10px; grid-template-columns: 1fr; }
+.step-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.step-fields[data-cols="1"] { grid-template-columns: 1fr; }
+.step-fields .input { text-align: center; font-size: 1.1rem; font-weight: 700; }
+.step-remove { justify-self: start; color: var(--danger); }

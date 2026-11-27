@@ -2,14 +2,15 @@
 
 import { useState } from "react";
 import { IconPlus } from "@/components/icons";
-import { buildQuickSets, parseSetCount, type DraftSet, type QuickAddErrors } from "@/lib/session-draft";
+import { buildQuickSets, parseSetCount, type DraftSet, type LoadMode, type QuickAddErrors } from "@/lib/session-draft";
+import { BarWeightField, LoadPicker } from "./LoadPicker";
 
 type Props = {
   /** Clave del ejercicio en el borrador: hace únicos los ids de los campos. */
   exerciseKey: string;
   exerciseName: string;
   /** Valores iniciales de reps y peso (p. ej., los de la última serie). */
-  defaults?: { reps: string; weight: string; bar?: boolean };
+  defaults?: { reps: string; weight: string; load?: LoadMode };
   onAdd: (sets: DraftSet[]) => void;
   onCancel?: () => void;
 };
@@ -25,7 +26,8 @@ export function QuickAddSets({ exerciseKey, exerciseName, defaults, onAdd, onCan
   const [count, setCount] = useState(DEFAULT_QUICK_COUNT);
   const [reps, setReps] = useState(defaults?.reps ?? "");
   const [weight, setWeight] = useState(defaults?.weight ?? "");
-  const [bar, setBar] = useState(Boolean(defaults?.bar));
+  // Carga: la de la última serie del ejercicio o, si no hay, «Con peso».
+  const [load, setLoad] = useState<LoadMode>(defaults?.load ?? "weight");
   const [errors, setErrors] = useState<QuickAddErrors>({});
 
   const parsedCount = parseSetCount(count);
@@ -34,7 +36,7 @@ export function QuickAddSets({ exerciseKey, exerciseName, defaults, onAdd, onCan
     : "Agregar series";
 
   function submit() {
-    const res = buildQuickSets({ count, reps, weight, bar });
+    const res = buildQuickSets({ count, reps, weight, load });
     if (!res.ok) {
       setErrors(res.errors);
       return;
@@ -54,7 +56,9 @@ export function QuickAddSets({ exerciseKey, exerciseName, defaults, onAdd, onCan
 
   return (
     <div className="quick-add" role="group" aria-label={`Captura rápida de series de ${exerciseName}`}>
-      <div className="quick-add-fields">
+      <LoadPicker value={load} onChange={setLoad} label={`Carga de las series de ${exerciseName}`} />
+      {/* Con peso: Series, Reps y Peso en una fila; solo barra o peso corporal: Series y Reps. */}
+      <div className="quick-add-fields" data-cols={load === "weight" ? 3 : 2}>
         <label className="field">
           <span>Series</span>
           <input
@@ -87,36 +91,28 @@ export function QuickAddSets({ exerciseKey, exerciseName, defaults, onAdd, onCan
             enterKeyHint="next"
           />
         </label>
-        <label className="field">
-          <span>Peso (kg)</span>
-          <input
-            className="input"
-            inputMode="decimal"
-            autoComplete="off"
-            placeholder={bar ? "barra" : "—"}
-            aria-label={`Peso por serie de ${exerciseName} (kg, vacío si es peso corporal)`}
-            aria-invalid={errors.weight ? true : undefined}
-            value={weight}
-            onChange={(e) => setWeight(e.target.value)}
-            onKeyDown={onKeyDown}
-            enterKeyHint="done"
-          />
-          <button
-            type="button"
-            className="bar-toggle"
-            aria-pressed={bar}
-            aria-label={`Solo barra en las series de ${exerciseName}`}
-            onClick={() => setBar((b) => !b)}
-          >
-            Solo barra
-          </button>
-        </label>
+        {load === "weight" ? (
+          <label className="field">
+            <span>Peso (kg)</span>
+            <input
+              className="input"
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder="—"
+              aria-label={`Peso por serie de ${exerciseName} (kg)`}
+              aria-invalid={errors.weight ? true : undefined}
+              value={weight}
+              onChange={(e) => setWeight(e.target.value)}
+              onKeyDown={onKeyDown}
+              enterKeyHint="done"
+            />
+          </label>
+        ) : null}
       </div>
-      {errorList.length ? (
-        <p className="quick-add-error" role="alert">{errorList.join(" · ")}</p>
-      ) : (
-        <p className="hint quick-add-hint">Deja el peso vacío si es peso corporal.</p>
-      )}
+      {load === "bar" ? (
+        <BarWeightField value={weight} onChange={setWeight} label={`Peso de la barra de ${exerciseName} (kg, opcional)`} />
+      ) : null}
+      {errorList.length ? <p className="quick-add-error" role="alert">{errorList.join(" · ")}</p> : null}
       <div className="row" style={{ flexWrap: "nowrap" }}>
         <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={submit}>
           <IconPlus /> {label}

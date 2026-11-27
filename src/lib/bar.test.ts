@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { formatSequence, formatStep, setBest } from "./blocks";
 import { formatSet, summarizeSets } from "./format";
 import { formatBestSet, sessionStats, usesWeight } from "./progress";
-import { draftToPayload, nextSet, setsToDraft } from "./session-draft";
+import { buildQuickSets, draftToPayload, loadOf, nextSet, setsToDraft, type DraftSet } from "./session-draft";
 import type { SetValue } from "./types";
 
 const barra: SetValue = { reps: 10, weight_kg: null, bar_only: true };
@@ -44,10 +44,50 @@ describe("«Solo barra»", () => {
 
   it("borrador: ida y vuelta, «Agregar serie» y copia conservan la marca", () => {
     const draft = setsToDraft([barra, bloques]);
-    expect(draft[0]).toMatchObject({ reps: "10", weight: "", bar: true });
-    expect(draft[1].blocks?.items.map((b) => b.bar ?? false)).toEqual([false, true]);
-    expect(nextSet([draft[0]])).toMatchObject({ reps: "10", weight: "", bar: true });
+    expect(draft[0]).toMatchObject({ reps: "10", weight: "", load: "bar" });
+    expect(draft[1].blocks?.items.map((b) => b.load)).toEqual(["weight", "bar"]);
+    expect(nextSet([draft[0]])).toMatchObject({ reps: "10", weight: "", load: "bar" });
     const res = draftToPayload({ id: "x", date: "2026-11-27", notes: "", editedAt: 0, exercises: [{ key: "a", exerciseId: "e", name: "E", sets: draft }] });
     expect(res.ok && res.payload.exercises[0].sets).toEqual([barra, bloques]);
+  });
+});
+
+describe("modo de carga", () => {
+  const payload = (sets: DraftSet[]) => {
+    const res = draftToPayload({ id: "x", date: "2026-11-27", notes: "", editedAt: 0, exercises: [{ key: "a", exerciseId: "e", name: "E", sets }] });
+    return res.ok ? res.payload.exercises[0].sets : null;
+  };
+
+  it("registros anteriores con peso vacío no reciben un modo; los explícitos se conservan", () => {
+    const [vacio, conPeso, corporal] = setsToDraft([
+      { reps: 10, weight_kg: null },
+      { reps: 8, weight_kg: 40 },
+      { reps: 12, weight_kg: null, bodyweight: true },
+    ]);
+    expect(loadOf(vacio)).toBeUndefined();
+    expect(loadOf(conPeso)).toBe("weight");
+    expect(loadOf(corporal)).toBe("body");
+    // Guardar sin tocar conserva el significado original.
+    expect(payload([vacio, conPeso, corporal])).toEqual([
+      { reps: 10, weight_kg: null },
+      { reps: 8, weight_kg: 40 },
+      { reps: 12, weight_kg: null, bodyweight: true },
+    ]);
+  });
+
+  it("solo barra con peso opcional, peso corporal sin peso y formato anterior de borradores", () => {
+    expect(payload([{ key: "1", reps: "10", weight: "", load: "bar" }])).toEqual([{ reps: 10, weight_kg: null, bar_only: true }]);
+    expect(payload([{ key: "1", reps: "10", weight: "20", load: "bar" }])).toEqual([{ reps: 10, weight_kg: 20, bar_only: true }]);
+    // Peso corporal ignora un peso escrito antes de cambiar de modo.
+    expect(payload([{ key: "1", reps: "10", weight: "30", load: "body" }])).toEqual([{ reps: 10, weight_kg: null, bodyweight: true }]);
+    // Borrador local antiguo con `bar: true`.
+    expect(payload([{ key: "1", reps: "10", weight: "", bar: true }])).toEqual([{ reps: 10, weight_kg: null, bar_only: true }]);
+  });
+
+  it("captura rápida por modo", () => {
+    const bar = buildQuickSets({ count: "3", reps: "10", weight: "", load: "bar" });
+    expect(bar.ok && bar.sets.map((x) => [x.reps, x.weight, x.load])).toEqual([["10", "", "bar"], ["10", "", "bar"], ["10", "", "bar"]]);
+    const body = buildQuickSets({ count: "2", reps: "12", weight: "abc", load: "body" });
+    expect(body.ok).toBe(true);
   });
 });

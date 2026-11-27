@@ -6,8 +6,8 @@ import { formatKg } from "./format-number";
  *   «Repeticiones»: reps y peso opcional · «Sostener»: segundos y peso opcional.
  */
 /** `bar_only`: «Solo barra» (el peso puede quedar vacío si se desconoce). */
-export type RepsBlock = { type: "reps"; reps: number; weight_kg: number | null; bar_only?: boolean };
-export type HoldBlock = { type: "hold"; seconds: number; weight_kg: number | null; bar_only?: boolean };
+export type RepsBlock = { type: "reps"; reps: number; weight_kg: number | null; bar_only?: boolean; bodyweight?: boolean };
+export type HoldBlock = { type: "hold"; seconds: number; weight_kg: number | null; bar_only?: boolean; bodyweight?: boolean };
 export type Block = RepsBlock | HoldBlock;
 
 /** Secuencia planificada de una rutina (sin pesos: se toman de «Última vez»). */
@@ -26,6 +26,8 @@ export type AnySet = {
   blocks?: Block[] | null;
   /** Serie simple con «Solo barra». */
   bar_only?: boolean;
+  /** Serie simple marcada explícitamente como «Peso corporal». */
+  bodyweight?: boolean;
 };
 
 const num = (v: number | string | null | undefined) => (v === null || v === undefined ? null : Number(v));
@@ -151,6 +153,8 @@ export function isValidBlockSet(s: AnySet): boolean {
     (b) =>
       okWeight(b.weight_kg) &&
       (b.bar_only === undefined || typeof b.bar_only === "boolean") &&
+      (b.bodyweight === undefined || typeof b.bodyweight === "boolean") &&
+      !(b.bodyweight && (b.bar_only || b.weight_kg !== null)) &&
       ((b.type === "reps" && Number.isInteger(b.reps) && b.reps >= 1 && b.reps <= 1000 && !("seconds" in b)) ||
         (b.type === "hold" && Number.isInteger(b.seconds) && b.seconds >= 1 && b.seconds <= MAX_HOLD_SECONDS && !("reps" in b))),
   );
