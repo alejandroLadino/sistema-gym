@@ -35,9 +35,10 @@ describe("draftToPayload", () => {
         id: "50000000-0000-4000-8000-000000000001",
         session_date: "2026-11-26",
         notes: null,
+        guided: { started: false, exercise_id: null },
         exercises: [
-          { exercise_id: "e0000000-0000-4000-8000-00000000000a", sets: [{ reps: 12, weight_kg: 40 }, { reps: 10, weight_kg: 42.5 }] },
-          { exercise_id: "e0000000-0000-4000-8000-00000000000b", sets: [{ reps: 8, weight_kg: null }] },
+          { exercise_id: "e0000000-0000-4000-8000-00000000000a", sets: [{ reps: 12, weight_kg: 40 }, { reps: 10, weight_kg: 42.5 }], target: null, completed: false, alt_group: null, alt_slot: null },
+          { exercise_id: "e0000000-0000-4000-8000-00000000000b", sets: [{ reps: 8, weight_kg: null }], target: null, completed: false, alt_group: null, alt_slot: null },
         ],
       },
     });
@@ -52,7 +53,7 @@ describe("draftToPayload", () => {
   it("una sesión sin ejercicios se puede guardar (en curso); la fecha sigue siendo obligatoria", () => {
     expect(draftToPayload(base([]))).toEqual({
       ok: true,
-      payload: { id: "50000000-0000-4000-8000-000000000001", session_date: "2026-11-26", notes: null, exercises: [] },
+      payload: { id: "50000000-0000-4000-8000-000000000001", session_date: "2026-11-26", notes: null, guided: { started: false, exercise_id: null }, exercises: [] },
     });
     expect(draftToPayload({ ...base([]), date: "" }).ok).toBe(false);
   });

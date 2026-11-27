@@ -836,6 +836,124 @@ delete from public.exercises where id = 'e0000000-0000-0000-0000-000000000011';
 reset role;
 \echo '   Carga «Peso corporal» (explícita, compatible, métricas, validación): OK'
 
+-- Entrenamiento guiado, cambio de ejercicio y series alternadas ---------------------------
+select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+insert into public.exercises (id, name, muscle_group_id) values
+  ('e0000000-0000-0000-0000-000000000021', 'Press inclinado con barra', 'pecho'),
+  ('e0000000-0000-0000-0000-000000000022', 'Press inclinado con mancuernas', 'pecho'),
+  ('e0000000-0000-0000-0000-000000000023', 'Poleas', 'pecho');
+do $$
+declare r jsonb; ok boolean; sid uuid := '50000000-0000-0000-0000-000000000021';
+begin
+  -- Pareja alternada, meta de la sesión, completado y modo guiado.
+  perform public.save_workout_session(jsonb_build_object('id', sid, 'session_date', '2026-11-27',
+    'guided', '{"started": true, "exercise_id": "e0000000-0000-0000-0000-000000000023"}'::jsonb,
+    'exercises', jsonb_build_array(
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-000000000021', 'completed', true, 'alt_group', 1, 'alt_slot', 0,
+        'target', '{"sets": 4, "min": 10, "max": 10, "blocks": null}'::jsonb,
+        'sets', '[{"reps": 10, "weight_kg": 40}, {"reps": 10, "weight_kg": 40}]'::jsonb),
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-000000000022', 'completed', false, 'alt_group', 1, 'alt_slot', 0,
+        'target', '{"sets": 2, "min": 10, "max": 10, "blocks": null}'::jsonb, 'sets', '[]'::jsonb),
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-000000000023', 'completed', false, 'alt_group', 1, 'alt_slot', 1,
+        'target', '{"sets": 3, "min": null, "max": null, "blocks": {"rounds": 1, "items": [{"type": "reps", "reps": 8}, {"type": "hold", "seconds": 5}]}}'::jsonb,
+        'sets', '[{"rounds": 1, "blocks": [{"type": "reps", "reps": 8, "weight_kg": 20}, {"type": "hold", "seconds": 5, "weight_kg": 20}]}]'::jsonb))));
+  r := public.get_workout_session(sid);
+  assert r ->> 'guided_exercise_id' = 'e0000000-0000-0000-0000-000000000023' and r ->> 'guided_started_at' is not null,
+    format('Modo guiado: %s', r);
+  assert (r -> 'exercises' -> 0 ->> 'completed')::boolean and (r -> 'exercises' -> 0 ->> 'alt_group')::int = 1
+         and (r -> 'exercises' -> 0 ->> 'target_sets')::int = 4, format('Original completado: %s', r -> 'exercises' -> 0);
+  assert (r -> 'exercises' -> 1 ->> 'alt_slot')::int = 0 and (r -> 'exercises' -> 1 ->> 'target_sets')::int = 2
+         and jsonb_array_length(r -> 'exercises' -> 1 -> 'sets') = 0, format('Sustituto en el mismo turno: %s', r -> 'exercises' -> 1);
+  assert (r -> 'exercises' -> 2 ->> 'alt_slot')::int = 1 and r -> 'exercises' -> 2 -> 'target_blocks' ->> 'rounds' = '1'
+         and r -> 'exercises' -> 2 ->> 'muscle_group_id' = 'pecho', format('Pareja con bloques: %s', r -> 'exercises' -> 2);
+  -- El historial conserva cada serie bajo su ejercicio.
+  assert (select count(*) from public.get_exercise_progress('e0000000-0000-0000-0000-000000000021', null, null)) = 1
+     and not exists (select 1 from public.get_exercise_progress('e0000000-0000-0000-0000-000000000022', null, null)),
+    'Las series quedan bajo el ejercicio correcto';
+
+  -- App anterior (sin las claves nuevas): conserva meta, completado, pareja y modo guiado.
+  perform public.save_workout_session(jsonb_build_object('id', sid, 'session_date', '2026-11-27',
+    'exercises', jsonb_build_array(
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-000000000021', 'sets', '[{"reps": 10, "weight_kg": 40}]'::jsonb),
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-000000000022', 'sets', '[]'::jsonb),
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-000000000023', 'sets', '[]'::jsonb))));
+  r := public.get_workout_session(sid);
+  assert (r -> 'exercises' -> 0 ->> 'completed')::boolean and (r -> 'exercises' -> 2 ->> 'alt_slot')::int = 1
+         and (r -> 'exercises' -> 1 ->> 'target_sets')::int = 2 and r ->> 'guided_started_at' is not null,
+    format('Compatible con la app anterior: %s', r);
+
+  -- Separar la pareja y reabrir: las series se conservan.
+  perform public.save_workout_session(jsonb_build_object('id', sid, 'session_date', '2026-11-27',
+    'guided', '{"started": true, "exercise_id": null}'::jsonb,
+    'exercises', jsonb_build_array(
+      jsonb_build_object('exercise_id', 'e0000000-0000-0000-0000-000000000021', 'completed', false, 'alt_group', null, 'alt_slot', null,
+        'target', null, 'sets', '[{"reps": 10, "weight_kg": 40}]'::jsonb))));
+  r := public.get_workout_session(sid);
+  assert not (r -> 'exercises' -> 0 ->> 'completed')::boolean and r -> 'exercises' -> 0 -> 'alt_group' = 'null'::jsonb
+         and r -> 'exercises' -> 0 -> 'target_sets' = 'null'::jsonb and jsonb_array_length(r -> 'exercises' -> 0 -> 'sets') = 1
+         and r -> 'guided_exercise_id' = 'null'::jsonb, format('Separar y reabrir: %s', r);
+
+  -- Validación: turno fuera de rango, pareja a medias y meta inválida.
+  foreach r in array array[
+    '{"exercise_id": "e0000000-0000-0000-0000-000000000021", "alt_group": 1, "alt_slot": 2, "sets": []}',
+    '{"exercise_id": "e0000000-0000-0000-0000-000000000021", "alt_group": 1, "alt_slot": null, "sets": []}',
+    '{"exercise_id": "e0000000-0000-0000-0000-000000000021", "target": {"sets": 0}, "sets": []}',
+    '{"exercise_id": "e0000000-0000-0000-0000-000000000021", "target": {"min": 12, "max": 8}, "sets": []}'
+  ]::jsonb[] loop
+    ok := false;
+    begin
+      perform public.save_workout_session(jsonb_build_object('id', '50000000-0000-0000-0000-000000000022', 'session_date', '2026-11-27',
+        'exercises', jsonb_build_array(r)));
+    exception when check_violation then ok := true;
+    end;
+    assert ok, format('Dato inválido aceptado: %s', r);
+  end loop;
+
+  -- Rutina con la pareja: se guarda, se lee y al usarla conserva el plan con cero series.
+  perform public.save_routine('{"id": "70000000-0000-0000-0000-000000000021", "name": "Pecho alternado", "exercises": [
+    {"exercise_id": "e0000000-0000-0000-0000-000000000021", "target_sets": 4, "target_reps_min": 10, "target_reps_max": 10, "alt_group": 1, "alt_slot": 0},
+    {"exercise_id": "e0000000-0000-0000-0000-000000000023", "target_sets": 3, "alt_group": 1, "alt_slot": 1},
+    {"exercise_id": "e0000000-0000-0000-0000-000000000022", "target_sets": 2}]}'::jsonb);
+  assert (select (exercises -> 1 ->> 'alt_slot')::int = 1 and exercises -> 2 -> 'alt_group' = 'null'::jsonb
+          from public.get_routines('70000000-0000-0000-0000-000000000021')), 'La rutina conserva la pareja';
+  perform public.start_routine_session('70000000-0000-0000-0000-000000000021', '50000000-0000-0000-0000-000000000023', '2026-11-28');
+  r := public.get_workout_session('50000000-0000-0000-0000-000000000023');
+  assert (r -> 'exercises' -> 0 ->> 'alt_group')::int = 1 and (r -> 'exercises' -> 1 ->> 'alt_slot')::int = 1
+         and (r -> 'exercises' -> 1 ->> 'target_sets')::int = 3 and r -> 'guided_started_at' = 'null'::jsonb
+         and not (r -> 'exercises' -> 0 ->> 'completed')::boolean
+         and (select sum(jsonb_array_length(e -> 'sets')) from jsonb_array_elements(r -> 'exercises') e) = 0,
+    format('Sesión desde la rutina: %s', r);
+  -- Si un ejercicio de la pareja está archivado, el otro deja de alternarse.
+  update public.exercises set archived_at = now() where id = 'e0000000-0000-0000-0000-000000000023';
+  perform public.start_routine_session('70000000-0000-0000-0000-000000000021', '50000000-0000-0000-0000-000000000024', '2026-11-28');
+  r := public.get_workout_session('50000000-0000-0000-0000-000000000024');
+  assert jsonb_array_length(r -> 'exercises') = 2 and r -> 'exercises' -> 0 -> 'alt_group' = 'null'::jsonb,
+    format('Pareja incompleta: %s', r);
+  update public.exercises set archived_at = null where id = 'e0000000-0000-0000-0000-000000000023';
+end $$;
+reset role;
+
+select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
+set role authenticated;
+do $$
+begin
+  assert public.get_workout_session('50000000-0000-0000-0000-000000000021') is null, 'Beto no ve la sesión guiada de Ana';
+  assert not exists (select 1 from public.get_routines('70000000-0000-0000-0000-000000000021')), 'Ni su rutina alternada';
+  update public.session_exercises set completed = true, alt_group = 9, alt_slot = 0;
+end $$;
+reset role;
+do $$
+begin
+  assert not exists (select 1 from public.session_exercises where alt_group = 9), 'Los intentos de Beto no tuvieron efecto';
+  delete from public.workout_sessions where id in ('50000000-0000-0000-0000-000000000021', '50000000-0000-0000-0000-000000000023',
+    '50000000-0000-0000-0000-000000000024');
+  delete from public.routines where id = '70000000-0000-0000-0000-000000000021';
+  delete from public.exercises where id in ('e0000000-0000-0000-0000-000000000021', 'e0000000-0000-0000-0000-000000000022',
+    'e0000000-0000-0000-0000-000000000023');
+end $$;
+\echo '   Guiado, cambio de ejercicio y series alternadas (guardado, compatibilidad, rutinas, aislamiento): OK'
+
 select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
 set role authenticated;
 do $$

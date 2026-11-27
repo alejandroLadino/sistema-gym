@@ -5,11 +5,22 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deleteSession, finishSession, getPreviousSets, saveSession } from "@/app/actions/sessions";
 import { ActionsMenu } from "@/components/ActionsMenu";
-import { IconCalendar, IconChevronDown, IconCopy, IconGrip, IconList, IconPencil, IconPlus, IconTrash } from "@/components/icons";
+import { IconCalendar, IconCheck, IconChevronDown, IconCopy, IconGrip, IconList, IconPencil, IconPlay, IconPlus, IconSwap, IconTrash } from "@/components/icons";
 import { formatSequence, formatSetTotals, formatStep, isBlockSet, sameShape, type BlockPlan } from "@/lib/blocks";
 import { formatDate, summarizeSets, todayLocal } from "@/lib/format";
 import { historyHref } from "@/lib/history-query";
-import { formatTarget } from "@/lib/routines";
+import { formatTarget, type Target } from "@/lib/routines";
+import {
+  buildSteps,
+  nextAltGroup,
+  pendingExercises,
+  progressText,
+  registeredSets,
+  stepExerciseKeys,
+  stepIndexFor,
+  swapExercise,
+  swapPlan,
+} from "@/lib/guided";
 import {
   appendSets,
   blocksToDraft,
@@ -25,6 +36,7 @@ import {
   isSetBlank,
   newKey,
   nextSet,
+  normalizeAlt,
   readNewPointer,
   readStoredDraft,
   removeStoredDraft,
@@ -44,6 +56,25 @@ import { useCardDrag } from "./useCardDrag";
 import { BlockSetSheet, emptyBlocks } from "./BlockSetSheet";
 import { BarWeightField, LoadPicker, loadLabel } from "./LoadPicker";
 import { QuickAddSets, quickRepsInputId } from "./QuickAddSets";
+import { GuidedView } from "./GuidedView";
+import { SwapSheet } from "./SwapSheet";
+import { AlternateSheet } from "./AlternateSheet";
+
+/** Vista abierta en este dispositivo (lista o guiado) para volver a ella al recargar. */
+const VIEW_PREFIX = "sistema-gym:vista:";
+function readView(id: string): "list" | "guided" {
+  try {
+    return localStorage.getItem(VIEW_PREFIX + id) === "guided" ? "guided" : "list";
+  } catch {
+    return "list";
+  }
+}
+function writeView(id: string, view: "list" | "guided") {
+  try {
+    if (view === "guided") localStorage.setItem(VIEW_PREFIX + id, "guided");
+    else localStorage.removeItem(VIEW_PREFIX + id);
+  } catch {}
+}
 
 type Status = "empty" | "dirty" | "invalid" | "saving" | "saved" | "error";
 
@@ -105,6 +136,14 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
   const [deleting, setDeleting] = useState(false);
   /** Ejercicios colapsados (solo muestran nombre y resumen). */
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  /** Lista de ejercicios o entrenamiento guiado (misma sesión). */
+  const [view, setView] = useState<"list" | "guided">("list");
+  /** «Cambiar ejercicio»: elegir el sustituto y confirmar. */
+  const [swap, setSwap] = useState<{ target: DraftExercise; substitute: Exercise | null } | null>(null);
+  /** «Alternar con otro ejercicio». */
+  const [altFor, setAltFor] = useState<DraftExercise | null>(null);
+  /** Resumen de ejercicios pendientes antes de finalizar (modo guiado iniciado). */
+  const [finishSummary, setFinishSummary] = useState(false);
 
   const draftRef = useRef<Draft | null>(null);
   const revision = useRef(0);
@@ -160,6 +199,8 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
     if (initialNotice) window.history.replaceState(null, "", window.location.pathname);
     // Al entrar a una sesión, todas las tarjetas empiezan cerradas.
     setCollapsed(Object.fromEntries(loaded.exercises.map((e) => [e.key, true])));
+    // Al recargar en modo guiado se vuelve a él (la posición viene de la sesión).
+    if (loaded.guided?.started && loaded.exercises.length && !initial?.finished_at && readView(loaded.id) === "guided") setView("guided");
   }, [initial, userId, initialNotice]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -318,7 +359,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
     scrollTarget.current = key;
     update((d) => ({
       ...d,
-      exercises: [...d.exercises, { key, exerciseId: exercise.id, name: exercise.name, sets: [] }],
+      exercises: [...d.exercises, { key, exerciseId: exercise.id, name: exercise.name, muscleGroupId: exercise.muscle_group_id, sets: [] }],
     }));
   };
 
@@ -333,7 +374,9 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
     update((d) => ({
       ...d,
       exercises: d.exercises.map((e) =>
-        e.key === target.key ? { key, exerciseId: exercise.id, name: exercise.name, sets: [] } : e,
+        e.key === target.key
+          ? { key, exerciseId: exercise.id, name: exercise.name, muscleGroupId: exercise.muscle_group_id, alt: e.alt ?? null, sets: [] }
+          : e,
       ),
     }));
   };
@@ -379,7 +422,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
       )
     )
       return;
-    update((d) => ({ ...d, exercises: d.exercises.filter((e) => e.key !== ex.key) }));
+    update((d) => ({ ...d, exercises: normalizeAlt(d.exercises.filter((e) => e.key !== ex.key)) }));
   };
 
   /** Copia la última sesión con sus valores originales. Solo se ofrece con el ejercicio vacío. */
@@ -465,8 +508,14 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
     focusQuickReps(ex.key);
   };
 
-  async function finish() {
+  async function finish(confirmed = false) {
     if (!draft) return;
+    // Modo guiado iniciado y ejercicios sin terminar: primero un resumen para confirmar.
+    if (!confirmed && !finished && draft.guided?.started && draft.exercises.length && pendingExercises(draft.exercises).length) {
+      setFinishSummary(true);
+      return;
+    }
+    setFinishSummary(false);
     if (draft.exercises.length === 0 && !savedOnce.current) {
       discard();
       return;
@@ -491,6 +540,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
           return;
         }
         setFinished(true);
+        writeView(draft.id, "list");
       } catch {
         setErrorMsg("Sin conexión con el servidor. Tu entrenamiento está guardado; pulsa «Finalizar sesión» de nuevo.");
         setShowErrors(true);
@@ -585,6 +635,104 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
   const exerciseKeys = draft?.exercises.map((e) => e.key) ?? [];
   const reorder = useCardDrag({ keys: exerciseKeys, cardId: (k) => `tarjeta-${k}`, listId: "lista-ejercicios", onDrop: moveExercise });
 
+  // --- Entrenamiento guiado (mismo borrador que la lista) ---------------------------
+  const steps = useMemo(() => buildSteps(draft?.exercises ?? []), [draft?.exercises]);
+  const byKey = useMemo(() => new Map((draft?.exercises ?? []).map((e) => [e.key, e])), [draft?.exercises]);
+  const guidedIndex = stepIndexFor(steps, byKey, draft?.guided?.exerciseId ?? null);
+
+  const openView = (next: "list" | "guided") => {
+    setView(next);
+    if (draftRef.current) writeView(draftRef.current.id, next);
+    window.scrollTo({ top: 0 });
+  };
+
+  /** «Iniciar / Continuar entrenamiento»: guarda que se inició y la posición. */
+  const startGuided = () => {
+    const current = draftRef.current;
+    if (!current || current.exercises.length === 0) return;
+    if (!current.guided?.started) {
+      const first = steps[stepIndexFor(steps, byKey, null)];
+      const exerciseId = first ? (byKey.get(stepExerciseKeys(first)[0])?.exerciseId ?? null) : null;
+      update((d) => ({ ...d, guided: { started: true, exerciseId } }));
+    }
+    openView("guided");
+  };
+
+  const setGuidedIndex = (i: number) => {
+    const step = steps[i];
+    if (!step) return;
+    const exerciseId = byKey.get(stepExerciseKeys(step)[0])?.exerciseId ?? null;
+    if (exerciseId === draftRef.current?.guided?.exerciseId) return;
+    update((d) => ({ ...d, guided: { started: true, exerciseId } }));
+  };
+
+  /** Registrar una serie: se agrega al final (las filas vacías se descartan). */
+  const addRegisteredSet = (exKey: string, set: DraftSet) =>
+    updateExercise(exKey, (e) => ({ ...e, sets: [...registeredSets(e), set] }));
+
+  /** Corregir una serie guardada: se reemplaza en su lugar (no se duplica). */
+  const replaceRegisteredSet = (exKey: string, setKey: string, set: DraftSet) =>
+    updateExercise(exKey, (e) => ({ ...e, sets: e.sets.map((s) => (s.key === setKey ? { ...set, key: setKey } : s)) }));
+
+  const setExercisesDone = (keys: string[], done: boolean) =>
+    update((d) => ({ ...d, exercises: d.exercises.map((e) => (keys.includes(e.key) ? { ...e, done } : e)) }));
+
+  /** Confirma «Cambiar ejercicio» (solo en esta sesión). */
+  const confirmSwap = (target: Target | null) => {
+    const current = swap;
+    if (!current?.substitute) return;
+    const sub = current.substitute;
+    setSwap(null);
+    const key = newKey();
+    const wasGuidedHere = draftRef.current?.guided?.exerciseId === current.target.exerciseId;
+    const mode = swapPlan(current.target).mode;
+    update((d) => ({
+      ...d,
+      exercises: swapExercise(d.exercises, current.target.key, {
+        key,
+        exerciseId: sub.id,
+        name: sub.name,
+        muscleGroupId: sub.muscle_group_id,
+        target,
+      }),
+      // En modo guiado, si el sustituto ocupa el lugar, la posición pasa a él.
+      guided: d.guided && wasGuidedHere && mode === "replace" ? { ...d.guided, exerciseId: sub.id } : d.guided,
+    }));
+    setCollapsed((c) => ({ ...c, [key]: false }));
+    if (view === "list") scrollTarget.current = key;
+    setNotice(
+      mode === "replace"
+        ? `«${sub.name}» reemplazó a «${current.target.name}» en esta sesión.`
+        : `«${current.target.name}» conserva sus series y quedó completado. Sigue con «${sub.name}».`,
+    );
+  };
+
+  /** «Alternar con otro ejercicio»: forma la pareja, define sus series y la deja junta. */
+  const confirmAlt = (partnerKey: string, setsA: number, setsB: number) => {
+    const source = altFor;
+    setAltFor(null);
+    if (!source) return;
+    update((d) => {
+      const group = nextAltGroup(d.exercises);
+      const withTarget = (e: DraftExercise, sets: number): DraftExercise => ({
+        ...e,
+        target: { sets, repsMin: e.target?.repsMin ?? null, repsMax: e.target?.repsMax ?? null, blocks: e.target?.blocks ?? null },
+      });
+      const partner = d.exercises.find((e) => e.key === partnerKey);
+      if (!partner) return d;
+      const list = d.exercises.filter((e) => e.key !== partnerKey);
+      const i = list.findIndex((e) => e.key === source.key);
+      list[i] = { ...withTarget(list[i], setsA), alt: { group, slot: 0 } };
+      list.splice(i + 1, 0, { ...withTarget(partner, setsB), alt: { group, slot: 1 } });
+      return { ...d, exercises: list };
+    });
+    setNotice(`Series alternadas: ${source.name} y ${draftRef.current?.exercises.find((e) => e.key === partnerKey)?.name ?? ""}.`);
+  };
+
+  /** Separa la pareja: cada ejercicio conserva sus series registradas. */
+  const separateAlt = (group: number) =>
+    update((d) => ({ ...d, exercises: d.exercises.map((e) => (e.alt?.group === group ? { ...e, alt: null } : e)) }));
+
   if (!draft) {
     return <p className="muted" aria-live="polite">Cargando entrenamiento…</p>;
   }
@@ -593,6 +741,76 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
   const setErrors = !validation.ok && showErrors ? validation.errors.sets : {};
   const inSession = new Set(exerciseIds);
   const isNew = !savedOnce.current;
+  const guidedOpen = view === "guided" && draft.exercises.length > 0 && !finished;
+
+  const statusNode = (
+    <span className="save-status" data-state={status} role="status" aria-live="polite">
+      <span className="dot" aria-hidden="true" />
+      <span>{STATUS_TEXT[status]}</span>
+    </span>
+  );
+  const retryNode =
+    status === "error" ? (
+      <button type="button" className="btn btn-sm btn-primary" onClick={() => void save(true)}>
+        Reintentar
+      </button>
+    ) : null;
+
+  const pending = pendingExercises(draft.exercises);
+  const summarySheet = finishSummary ? (
+    <div className="sheet-backdrop" onClick={() => setFinishSummary(false)}>
+      <div className="sheet stack" role="dialog" aria-modal="true" aria-labelledby="resumen-titulo" onClick={(e) => e.stopPropagation()}>
+        <h2 id="resumen-titulo" style={{ margin: 0 }}>¿Finalizar con ejercicios pendientes?</h2>
+        <p className="muted" style={{ margin: 0 }}>Se guardará solo lo que registraste.</p>
+        <ul className="pending-list">
+          {pending.map((p) => (
+            <li key={p.key}>
+              <strong>{p.name}</strong> <span className="muted">· {p.text}</span>
+            </li>
+          ))}
+        </ul>
+        <button type="button" className="btn btn-primary btn-block" onClick={() => void finish(true)} disabled={finishing}>
+          {finishing ? "Finalizando…" : "Finalizar sesión"}
+        </button>
+        <button type="button" className="btn btn-ghost btn-block" onClick={() => setFinishSummary(false)}>
+          Seguir entrenando
+        </button>
+      </div>
+    </div>
+  ) : null;
+
+  if (guidedOpen) {
+    return (
+      <div>
+        {status === "error" && errorMsg ? (
+          <p className="alert alert-error" role="alert">{errorMsg} Tus datos siguen aquí; pulsa «Reintentar».</p>
+        ) : errorMsg && showErrors ? (
+          <p className="alert alert-error" role="alert">{errorMsg}</p>
+        ) : null}
+        <GuidedView
+          exercises={draft.exercises}
+          steps={steps}
+          index={guidedIndex}
+          previous={prevForDate}
+          prevError={prevError}
+          status={
+            <span className="guided-status">
+              {statusNode}
+              {retryNode}
+            </span>
+          }
+          onIndexChange={setGuidedIndex}
+          onAddSet={addRegisteredSet}
+          onReplaceSet={replaceRegisteredSet}
+          onSetDone={setExercisesDone}
+          onExit={() => openView("list")}
+          onFinishSession={() => void finish()}
+          finishing={finishing}
+        />
+        {summarySheet}
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -600,7 +818,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
         <div className="session-head-row">
           <h1>Sesión de entrenamiento</h1>
           <div className="session-head-actions">
-            <button type="button" className="btn btn-sm btn-primary" onClick={finish} disabled={status === "saving" || finishing}>
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => void finish()} disabled={status === "saving" || finishing}>
               {finishing ? "Finalizando…" : finished ? "Listo" : "Finalizar sesión"}
             </button>
             {finished ? (
@@ -631,14 +849,9 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
           </label>
           <div className="session-head-status">
             {finished ? <span className="badge badge-success">Finalizada</span> : null}
-            <span className="save-status" data-state={status} role="status" aria-live="polite">
-              <span className="dot" aria-hidden="true" />
-              <span>{STATUS_TEXT[status]}</span>
-            </span>
+            {statusNode}
             {status === "error" ? (
-              <button type="button" className="btn btn-sm btn-primary" onClick={() => void save(true)}>
-                Reintentar
-              </button>
+              retryNode
             ) : status === "dirty" || status === "invalid" ? (
               <button type="button" className="btn btn-sm" onClick={() => void save(true)}>
                 Guardar
@@ -670,6 +883,10 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
         ) : null}
         {draft.exercises.length === 0 ? (
           <p className="muted" style={{ margin: 0 }}>Agrega tu primer ejercicio para empezar a registrar series.</p>
+        ) : !finished ? (
+          <button type="button" className="btn btn-primary btn-lg btn-block guided-start" onClick={startGuided}>
+            <IconPlay /> {draft.guided?.started ? "Continuar entrenamiento" : "Iniciar entrenamiento"}
+          </button>
         ) : null}
 
         <p id="reordenar-ayuda" className="sr-only">
@@ -704,6 +921,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
               className="card exercise-card"
               aria-label={ex.name}
               data-collapsed={isCollapsed || undefined}
+              data-done={ex.done || undefined}
               data-dragging={reorder.drag?.key === ex.key || undefined}
               data-shifting={(reorder.drag && reorder.drag.key !== ex.key) || undefined}
               style={reorder.styleFor(ex.key, exIndex)}
@@ -724,12 +942,32 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
                     {formatTarget(ex.target) ? (
                       <span id={`${bodyId}-meta`} className="ex-goal">Meta: {formatTarget(ex.target)}</span>
                     ) : null}
+                    {ex.done ? (
+                      <span className="ex-done"><IconCheck /> Completado</span>
+                    ) : progressText(ex) ? (
+                      <span className="ex-progress">{progressText(ex)}</span>
+                    ) : null}
+                    {ex.alt ? (
+                      <span className="alt-badge">
+                        ⇄ Series alternadas · con{" "}
+                        {draft.exercises.filter((o) => o.alt?.group === ex.alt!.group && o.alt.slot !== ex.alt!.slot).map((o) => o.name).join(" / ")}
+                      </span>
+                    ) : null}
                     <span id={`${bodyId}-resumen`} className="ex-summary" hidden={!isCollapsed}>
                       {summary.text}
                       {summary.incomplete ? <span className="badge badge-warning">Faltan datos</span> : null}
                     </span>
                     {ex.archived ? <span className="badge">Archivado</span> : null}
                   </span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-icon swap-btn"
+                  aria-label={`Cambiar ejercicio ${ex.name}`}
+                  title="Cambiar ejercicio"
+                  onClick={() => setSwap({ target: ex, substitute: null })}
+                >
+                  <IconSwap />
                 </button>
                 {draft.exercises.length >= 2 ? (
                   <button
@@ -756,11 +994,27 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
                   onRemove={() => removeExercise(ex)}
                   onMoveUp={exIndex > 0 ? () => moveExercise(ex.key, exIndex - 1) : null}
                   onMoveDown={exIndex < draft.exercises.length - 1 ? () => moveExercise(ex.key, exIndex + 1) : null}
+                  extra={[
+                    ex.done
+                      ? { label: "Reabrir ejercicio", icon: <IconPencil />, onSelect: () => setExercisesDone([ex.key], false) }
+                      : { label: "Finalizar ejercicio", icon: <IconCheck />, onSelect: () => setExercisesDone([ex.key], true) },
+                    ex.alt
+                      ? { label: "Separar series alternadas", icon: <IconSwap />, onSelect: () => separateAlt(ex.alt!.group) }
+                      : { label: "Alternar con otro ejercicio", icon: <IconSwap />, onSelect: () => setAltFor(ex) },
+                  ]}
                 />
               </div>
 
               {!isCollapsed ? (
                 <div id={bodyId}>
+                  {ex.done ? (
+                    <div className="ex-done-row">
+                      <span className="ex-done"><IconCheck /> Completado</span>
+                      <button type="button" className="btn btn-sm" onClick={() => setExercisesDone([ex.key], false)}>
+                        Reabrir ejercicio
+                      </button>
+                    </div>
+                  ) : null}
                   {ex.target?.blocks ? (
                     <div className="plan-box">
                       <p style={{ margin: 0 }}>
@@ -1006,6 +1260,54 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
           notice={blockSheet.notice}
           onSubmit={submitBlocks}
           onClose={() => setBlockSheet(null)}
+        />
+      ) : null}
+
+      {summarySheet}
+
+      {altFor ? (
+        <AlternateSheet
+          exercise={altFor}
+          candidates={draft.exercises.filter((e) => e.key !== altFor.key && !e.alt)}
+          onConfirm={confirmAlt}
+          onClose={() => setAltFor(null)}
+        />
+      ) : null}
+
+      {swap && !swap.substitute ? (
+        <ExercisePicker
+          exercises={catalog}
+          muscleGroups={muscleGroups}
+          inSession={inSession}
+          hideInSession
+          initialGroup={swap.target.muscleGroupId ?? catalog.find((c) => c.id === swap.target.exerciseId)?.muscle_group_id ?? null}
+          title="Cambiar ejercicio"
+          header={
+            <p className="swap-current" style={{ margin: 0 }}>
+              <span className="muted small">Ejercicio actual</span> <strong>{swap.target.name}</strong>
+              <span className="badge badge-primary">Solo en esta sesión</span>
+            </p>
+          }
+          onClose={() => setSwap(null)}
+          onPick={(exercise) => setSwap((sw) => (sw ? { ...sw, substitute: exercise } : sw))}
+          onCreated={(exercise) => setCatalog((c) => (c.some((x) => x.id === exercise.id) ? c : [...c, exercise]))}
+        />
+      ) : null}
+      {swap?.substitute ? (
+        <SwapSheet
+          original={swap.target}
+          substitute={swap.substitute}
+          plan={swapPlan(swap.target)}
+          partnerName={
+            swap.target.alt
+              ? draft.exercises.filter((o) => o.alt?.group === swap.target.alt!.group && o.alt.slot !== swap.target.alt!.slot).map((o) => o.name).join(" / ") || null
+              : null
+          }
+          date={draft.date}
+          sessionId={draft.id}
+          onConfirm={confirmSwap}
+          onBack={() => setSwap((sw) => (sw ? { ...sw, substitute: null } : sw))}
+          onClose={() => setSwap(null)}
         />
       ) : null}
 

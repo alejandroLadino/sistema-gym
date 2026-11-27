@@ -3,15 +3,20 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { IconChevronDown, IconMore, IconTrash } from "@/components/icons";
 
-/** Menú «⋯» de una tarjeta de ejercicio: mover (alternativa accesible al arrastre) y quitar. */
+export type CardMenuItem = { label: string; icon?: React.ReactNode; onSelect: () => void };
+
+/** Menú «⋯» de una tarjeta de ejercicio: mover (alternativa accesible al arrastre), acciones extra y quitar. */
 export function CardMenu({
   exerciseName,
   onRemove,
   onMoveUp,
   onMoveDown,
+  extra = [],
 }: {
   exerciseName: string;
   onRemove: () => void;
+  /** Acciones adicionales (p. ej., «Alternar con otro ejercicio»), antes de «Quitar». */
+  extra?: CardMenuItem[];
   /** null: no se puede mover en esa dirección (primero / último). */
   onMoveUp?: (() => void) | null;
   onMoveDown?: (() => void) | null;
@@ -86,8 +91,23 @@ export function CardMenu({
               <IconChevronDown /> Mover abajo
             </button>
           ) : null}
+          {extra.map((item, i) => (
+            <button
+              key={item.label}
+              ref={!onMoveUp && !onMoveDown && i === 0 ? firstItemRef : undefined}
+              type="button"
+              role="menuitem"
+              className="card-menu-item"
+              onClick={() => {
+                setOpen(false);
+                item.onSelect();
+              }}
+            >
+              {item.icon ?? null} {item.label}
+            </button>
+          ))}
           <button
-            ref={onMoveUp || onMoveDown ? undefined : firstItemRef}
+            ref={onMoveUp || onMoveDown || extra.length ? undefined : firstItemRef}
             type="button"
             role="menuitem"
             className="card-menu-item danger"

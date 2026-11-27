@@ -40,6 +40,7 @@ export default async function EditRoutinePage({ params }: PageProps<"/rutinas/[i
         // Una cantidad exacta (mín = máx) se muestra solo en «mín».
         repsMax: e.target_reps_max !== null && e.target_reps_max !== e.target_reps_min ? show(e.target_reps_max) : "",
         plan: e.target_blocks ? planToDraft(e.target_blocks, newKey) : null,
+        alt: e.alt_group != null && (e.alt_slot === 0 || e.alt_slot === 1) ? { group: e.alt_group, slot: e.alt_slot } : null,
       }))}
       exercises={(exercises ?? []) as Exercise[]}
       muscleGroups={groups}

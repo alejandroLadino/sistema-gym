@@ -47,16 +47,25 @@ export type SessionData = {
   updated_at: string;
   /** null = en curso; fecha = finalizada. */
   finished_at?: string | null;
+  /** Modo guiado: cuándo se inició (null = no se inició) y en qué ejercicio quedó. */
+  guided_started_at?: string | null;
+  guided_exercise_id?: string | null;
   exercises: {
     exercise_id: string;
     name: string;
     muscle_group: string | null;
+    muscle_group_id?: string | null;
     archived: boolean;
     /** Metas copiadas de la rutina al iniciar la sesión (solo referencia). */
     target_sets?: number | null;
     target_reps_min?: number | null;
     target_reps_max?: number | null;
     target_blocks?: BlockPlan | null;
+    /** Marcado como finalizado («✓ Completado»). */
+    completed?: boolean;
+    /** Series alternadas: pareja (alt_group) y turno dentro de ella (alt_slot 0 o 1). */
+    alt_group?: number | null;
+    alt_slot?: number | null;
     sets: SetValue[];
   }[];
 };

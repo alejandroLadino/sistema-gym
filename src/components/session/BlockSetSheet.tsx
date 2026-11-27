@@ -19,6 +19,8 @@ type Props = {
   notice?: string;
   onSubmit: (blocks: DraftBlocks, count: number) => void;
   onClose: () => void;
+  /** Texto del botón principal (p. ej., «Guardar y seguir» en series alternadas). */
+  submitLabel?: string;
 };
 
 /** Secuencia vacía: el panel ofrece «+ Repeticiones», «+ Sostén» y el atajo «Reps + sostén». */
@@ -46,7 +48,7 @@ function stepLabel(b: DraftBlock): string {
  * valor y su peso opcional), «Vueltas por serie» (veces que se repite la secuencia
  * dentro de la serie) y, al agregar, «Series a agregar».
  */
-export function BlockSetSheet({ exerciseName, initial, initialCount, title, notice, onSubmit, onClose }: Props) {
+export function BlockSetSheet({ exerciseName, initial, initialCount, title, notice, onSubmit, onClose, submitLabel }: Props) {
   const [items, setItems] = useState<DraftBlock[]>(initial.items);
   const [rounds, setRounds] = useState(initial.rounds || "1");
   const [count, setCount] = useState(String(initialCount ?? 1));
@@ -296,7 +298,7 @@ export function BlockSetSheet({ exerciseName, initial, initialCount, title, noti
             {sequence ? (adding ? `${plural(n, "serie", "series")} de ${sequence}` : sequence) : "Agrega al menos un paso"}
           </p>
           <button type="button" className="btn btn-primary btn-block" onClick={submit}>
-            {adding ? `Agregar ${plural(n, "serie", "series")}` : "Guardar cambios"}
+            {submitLabel ?? (adding ? `Agregar ${plural(n, "serie", "series")}` : "Guardar cambios")}
           </button>
         </div>
       </div>

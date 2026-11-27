@@ -57,6 +57,7 @@ export function RoutineList({ routines, sessions, serverToday, notice }: Props) 
                       <li key={e.exercise_id}>
                         <span>{e.name}</span>
                         {goal ? <span className="muted"> · {goal}</span> : null}
+                        {e.alt_group != null ? <span className="muted"> · ⇄ alternada</span> : null}
                         {e.archived ? <span className="badge badge-warning">Archivado</span> : null}
                       </li>
                     );

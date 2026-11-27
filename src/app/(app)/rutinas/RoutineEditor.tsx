@@ -71,6 +71,8 @@ export function RoutineEditor({ routineId, initialName, initialExercises, exerci
       repsMin: target?.repsMin ?? "",
       repsMax: target?.repsMax ?? "",
       plan: target?.plan ?? null,
+      // Al reemplazar, el nuevo toma el turno del anterior en sus series alternadas.
+      alt: target?.alt ?? null,
     };
     setRows((rs) => {
       // Un ejercicio no se repite dentro de la rutina (doble toque incluido).
@@ -161,6 +163,7 @@ export function RoutineEditor({ routineId, initialName, initialExercises, exerci
           {rows.map((r, i) => {
             const err = errors.targets[r.key] ?? {};
             const group = muscleGroupName(muscleGroups, r.muscleGroupId) ?? UNCLASSIFIED_LABEL;
+            const partners = r.alt ? rows.filter((x) => x.alt?.group === r.alt!.group && x.key !== r.key).map((x) => x.name) : [];
             return (
               <li key={r.key} className="card routine-ex" aria-label={`${i + 1}. ${r.name}`}>
                 <div className="routine-ex-head">
@@ -169,6 +172,9 @@ export function RoutineEditor({ routineId, initialName, initialExercises, exerci
                     <strong>{r.name}</strong>
                     <span className="muted small">{group}</span>
                     {r.archived ? <span className="badge badge-warning">Archivado</span> : null}
+                    {partners.length ? (
+                      <span className="alt-badge">⇄ Series alternadas · con {partners.join(", ")}</span>
+                    ) : null}
                   </span>
                   <span className="routine-ex-order">
                     <button
@@ -373,6 +379,17 @@ export function RoutineEditor({ routineId, initialName, initialExercises, exerci
                     <IconPlus /> Definir secuencia por bloques
                   </button>
                 )}
+
+                {partners.length ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    aria-label={`Separar las series alternadas de ${r.name}`}
+                    onClick={() => setRows((rs) => rs.map((x) => (x.alt?.group === r.alt!.group ? { ...x, alt: null } : x)))}
+                  >
+                    Separar series alternadas
+                  </button>
+                ) : null}
 
                 <button
                   type="button"
