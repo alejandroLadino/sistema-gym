@@ -3,6 +3,8 @@ import {
   distinctPlans,
   formatPlan,
   formatSequence,
+  formatSetTotals,
+  formatStep,
   isValidBlockSet,
   planOfSet,
   setBest,
@@ -60,6 +62,14 @@ describe("series por bloques", () => {
     expect(s).toMatchObject({ setCount: 4, totalReps: 84, holdSeconds: 84, maxWeight: null, best: { reps: 7, weight_kg: null } });
   });
 
+  it("totales por serie y formato de pasos", () => {
+    expect(formatSetTotals(laterales)).toBe("21 reps · 21 s de sostén");
+    expect(formatSetTotals(smith)).toBe("21 reps · de 30 a 40 kg");
+    expect(formatSetTotals({ ...smith, blocks: [{ type: "reps", reps: 7, weight_kg: 40 }] })).toBe("7 reps · a 40 kg");
+    expect(formatStep({ type: "hold", seconds: 7, weight_kg: null })).toBe("Sostener 7 s");
+    expect(formatStep({ type: "reps", reps: 7, weight_kg: 37.5 })).toBe("7 reps a 37,5 kg");
+  });
+
   it("la mejor serie usa el bloque de mayor peso con sus reps", () => {
     const s: SetValue = {
       reps: null,
@@ -106,8 +116,8 @@ describe("borrador con series por bloques", () => {
     const res = parseBlocks(bad);
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.error).toMatch(/Repetir secuencia/);
-      expect(Object.values(res.blockErrors)[0]).toMatch(/Bloque 1/);
+      expect(res.error).toMatch(/Vueltas por serie/);
+      expect(Object.values(res.blockErrors)[0]).toMatch(/Paso 1/);
     }
   });
 

@@ -136,3 +136,32 @@ export function isValidBlockSet(s: AnySet): boolean {
         (b.type === "hold" && Number.isInteger(b.seconds) && b.seconds >= 1 && b.seconds <= MAX_HOLD_SECONDS && !("reps" in b))),
   );
 }
+
+/** Paso para listas: «7 reps a 40 kg», «Sostener 7 s», «Sostener 30 s a 12,5 kg». */
+export function formatStep(b: Block | BlockPlanItem): string {
+  const w = "weight_kg" in b ? b.weight_kg : null;
+  if (b.type === "hold") return `Sostener ${b.seconds} s${weightText(w)}`;
+  return `${b.reps} reps${weightText(w)}`;
+}
+
+/** Cargas de los pasos de repeticiones: «a 40 kg» o «de 30 a 40 kg» (null sin peso). */
+export function loadsText(s: AnySet): string | null {
+  if (!isBlockSet(s)) return null;
+  const ws = s.blocks.map((b) => num(b.weight_kg)).filter((w): w is number => w !== null);
+  if (ws.length === 0) return null;
+  const min = Math.min(...ws);
+  const max = Math.max(...ws);
+  return min === max ? `a ${formatKg(max)} kg` : `de ${formatKg(min)} a ${formatKg(max)} kg`;
+}
+
+/** Totales de una serie por bloques: «21 reps · 21 s de sostén», con ciclos aplicados. */
+export function formatSetTotals(s: AnySet): string {
+  const reps = setTotalReps(s);
+  const hold = setHoldSeconds(s);
+  const parts: string[] = [];
+  if (reps > 0) parts.push(`${reps} reps`);
+  if (hold > 0) parts.push(`${hold} s de sostén`);
+  const loads = loadsText(s);
+  if (loads) parts.push(loads);
+  return parts.join(" · ");
+}
