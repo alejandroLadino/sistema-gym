@@ -583,6 +583,15 @@ begin
   select * into r from public.get_training_consistency('2026-11-01');
   assert r.total_days = 2 and r.recent_days = array['2026-11-26', '2026-11-16']::date[]
          and r.active_weeks = array['2026-11-23', '2026-11-16']::date[], format('Al finalizar cuenta: %s', row_to_json(r));
+  assert r.active_week_days = array[1, 1], format('Días por semana activa: %s', row_to_json(r));
+  -- Dos días distintos en una semana: la semana suma 2 (para el fueguito).
+  perform public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000020", "session_date": "2026-11-24",
+    "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a", "sets": [{"reps": 6, "weight_kg": 40}]}]}'::jsonb);
+  perform public.finish_workout_session('50000000-0000-0000-0000-000000000020');
+  select * into r from public.get_training_consistency('2026-11-01');
+  assert r.active_weeks = array['2026-11-23', '2026-11-16']::date[] and r.active_week_days = array[2, 1],
+    format('Semana con dos días: %s', row_to_json(r));
+  delete from public.workout_sessions where id = '50000000-0000-0000-0000-000000000020';
   -- Solo los días desde p_since; el total y las semanas son de todo el historial.
   select * into r from public.get_training_consistency('2026-11-20');
   assert r.total_days = 2 and r.recent_days = array['2026-11-26']::date[] and cardinality(r.active_weeks) = 2, 'Ventana reciente';
@@ -612,7 +621,8 @@ do $$
 declare r record;
 begin
   select * into r from public.get_training_consistency('2000-01-01');
-  assert r.total_days = 0 and r.recent_days = '{}'::date[] and r.active_weeks = '{}'::date[], 'La constancia es privada';
+  assert r.total_days = 0 and r.recent_days = '{}'::date[] and r.active_weeks = '{}'::date[]
+         and r.active_week_days = '{}'::integer[], 'La constancia es privada';
 end $$;
 reset role;
 \echo '   Tu constancia (días distintos, válidas, fecha, series, eliminación, aislamiento): OK'

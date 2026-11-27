@@ -50,4 +50,23 @@ describe("constancia", () => {
       pending: false,
     });
   });
+
+  it("el fueguito acumula los días de la racha (y vuelve a cero si se corta)", () => {
+    const row = {
+      total_days: 9,
+      recent_days: ["2026-11-26", "2026-11-24"],
+      active_weeks: ["2026-11-23", "2026-11-16", "2026-11-09", "2026-10-26"],
+      active_week_days: [2, 3, 1, 3],
+    };
+    // Esta semana (2) + la anterior (3) + la de antes (1); la de octubre queda fuera (semana sin entrenar en medio).
+    expect(consistency(row, "2026-11-26")).toMatchObject({ streak: 3, streakDays: 6, totalDays: 9 });
+    // Lunes siguiente sin actividad: la racha queda pendiente y conserva sus días.
+    expect(consistency(row, "2026-11-30")).toMatchObject({ streak: 3, streakDays: 6, pending: true });
+    // Una semana completa sin entrenar: vuelve a cero.
+    expect(consistency(row, "2026-12-07")).toMatchObject({ streak: 0, streakDays: 0 });
+    // Un solo día entrenado: 1 día en el fueguito y 1 semana de racha.
+    expect(consistency({ total_days: 1, recent_days: ["2026-11-26"], active_weeks: ["2026-11-23"], active_week_days: [1] }, "2026-11-27"))
+      .toMatchObject({ streak: 1, streakDays: 1, weekDays: 1 });
+    expect(consistency(null, "2026-11-27")).toMatchObject({ streakDays: 0 });
+  });
 });
