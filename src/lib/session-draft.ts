@@ -1,6 +1,7 @@
 import { isIsoDate } from "./format";
 import { bestSet, formatBestSet } from "./progress";
 import type { SessionData, SetValue } from "./types";
+import type { Target } from "./routines";
 import { parseReps, parseWeight, type Parsed } from "./validation";
 
 export type DraftSet = { key: string; reps: string; weight: string };
@@ -9,6 +10,8 @@ export type DraftExercise = {
   exerciseId: string;
   name: string;
   archived?: boolean;
+  /** Meta de la rutina con que se inició la sesión (solo se muestra; no se envía). */
+  target?: Target | null;
   sets: DraftSet[];
 };
 export type Draft = {
@@ -59,6 +62,10 @@ export function sessionToDraft(session: SessionData): Draft {
       exerciseId: e.exercise_id,
       name: e.name,
       archived: e.archived,
+      target:
+        e.target_sets != null || e.target_reps_min != null
+          ? { sets: e.target_sets ?? null, repsMin: e.target_reps_min ?? null, repsMax: e.target_reps_max ?? null }
+          : null,
       sets: setsToDraft(e.sets),
     })),
   };

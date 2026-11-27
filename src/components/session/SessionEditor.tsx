@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deleteSession, finishSession, getPreviousSets, saveSession } from "@/app/actions/sessions";
-import { IconCalendar, IconChevronDown, IconCopy, IconPlus, IconTrash } from "@/components/icons";
+import { ActionsMenu } from "@/components/ActionsMenu";
+import { IconCalendar, IconChevronDown, IconCopy, IconList, IconPlus, IconTrash } from "@/components/icons";
 import { formatDate, summarizeSets, todayLocal } from "@/lib/format";
 import { historyHref } from "@/lib/history-query";
+import { formatTarget } from "@/lib/routines";
 import {
   appendSets,
   clearNewPointer,
@@ -463,6 +465,16 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
     router.push(`${href}${href.includes("?") ? "&" : "?"}eliminada=1`);
   }
 
+  /** «Guardar como rutina» (sesión finalizada): guarda lo pendiente y abre la plantilla precargada. */
+  async function saveAsRoutine() {
+    if (!draft) return;
+    if (revision.current !== savedRevision.current || status === "error") {
+      const ok = await save(true);
+      if (!ok) return;
+    }
+    router.push(`/rutinas/nueva?desde=${draft.id}`);
+  }
+
   function discardLocalCopy() {
     if (!draft) return;
     removeStoredDraft(draft.id);
@@ -484,9 +496,17 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
       <header className="session-head">
         <div className="session-head-row">
           <h1>Sesión de entrenamiento</h1>
-          <button type="button" className="btn btn-sm btn-primary" onClick={finish} disabled={status === "saving" || finishing}>
-            {finishing ? "Finalizando…" : finished ? "Listo" : "Finalizar sesión"}
-          </button>
+          <div className="session-head-actions">
+            <button type="button" className="btn btn-sm btn-primary" onClick={finish} disabled={status === "saving" || finishing}>
+              {finishing ? "Finalizando…" : finished ? "Listo" : "Finalizar sesión"}
+            </button>
+            {finished ? (
+              <ActionsMenu
+                label="Acciones de la sesión"
+                items={[{ label: "Guardar como rutina", icon: <IconList />, onSelect: () => void saveAsRoutine() }]}
+              />
+            ) : null}
+          </div>
         </div>
         <div className="session-head-row">
           <label className="date-control">
@@ -574,12 +594,15 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
                   aria-expanded={!isCollapsed}
                   aria-controls={bodyId}
                   aria-label={`${isCollapsed ? "Expandir" : "Colapsar"} ${ex.name}`}
-                  aria-describedby={`${bodyId}-resumen`}
+                  aria-describedby={ex.target ? `${bodyId}-meta ${bodyId}-resumen` : `${bodyId}-resumen`}
                   onClick={() => toggleCollapsed(ex.key)}
                 >
                   <span className="ex-chevron" aria-hidden="true"><IconChevronDown /></span>
                   <span className="ex-title">
                     <h3>{ex.name}</h3>
+                    {formatTarget(ex.target) ? (
+                      <span id={`${bodyId}-meta`} className="ex-goal">Meta: {formatTarget(ex.target)}</span>
+                    ) : null}
                     <span id={`${bodyId}-resumen`} className="ex-summary" hidden={!isCollapsed}>
                       {summary.text}
                       {summary.incomplete ? <span className="badge badge-warning">Faltan datos</span> : null}

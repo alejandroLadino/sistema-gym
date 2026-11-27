@@ -37,6 +37,10 @@ export type SessionData = {
     name: string;
     muscle_group: string | null;
     archived: boolean;
+    /** Metas copiadas de la rutina al iniciar la sesión (solo referencia). */
+    target_sets?: number | null;
+    target_reps_min?: number | null;
+    target_reps_max?: number | null;
     sets: SetValue[];
   }[];
 };

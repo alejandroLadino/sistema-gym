@@ -408,6 +408,152 @@ delete from public.workout_sessions where id in ('50000000-0000-0000-0000-000000
   '50000000-0000-0000-0000-000000000005', '50000000-0000-0000-0000-000000000006');
 reset role;
 
+-- «Mis rutinas» -----------------------------------------------------------------------
+-- Rutina R1 «Pecho y tríceps»: Fondos (3 × 8–12) y Press de banca (sin metas).
+select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+insert into public.exercises (id, name, muscle_group_id) values
+  ('e0000000-0000-0000-0000-00000000000c', 'Fondos', 'triceps');
+do $$
+declare r jsonb; ok boolean; v_err text;
+begin
+  -- Validaciones al crear.
+  foreach r in array array[
+    '{"id": "70000000-0000-0000-0000-0000000000f1", "name": "  ", "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a"}]}',
+    '{"id": "70000000-0000-0000-0000-0000000000f1", "name": "Vacía", "exercises": []}',
+    '{"id": "70000000-0000-0000-0000-0000000000f1", "name": "Archivado", "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000b"}]}',
+    '{"id": "70000000-0000-0000-0000-0000000000f1", "name": "Mín > máx", "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a", "target_reps_min": 12, "target_reps_max": 8}]}',
+    '{"id": "70000000-0000-0000-0000-0000000000f1", "name": "Series 0", "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a", "target_sets": 0}]}',
+    '{"id": "70000000-0000-0000-0000-0000000000f1", "name": "Repetido", "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a"}, {"exercise_id": "e0000000-0000-0000-0000-00000000000a"}]}'
+  ]::jsonb[] loop
+    ok := false;
+    begin
+      perform public.save_routine(r);
+    exception when check_violation or unique_violation then ok := true;
+    end;
+    assert ok, format('La rutina inválida debe rechazarse: %s', r ->> 'name');
+  end loop;
+  assert not exists (select 1 from public.routines), 'Los rechazos no dejan rutinas a medias';
+
+  -- Crear (idempotente por id) y leer en orden con metas.
+  for i in 1..2 loop
+    perform public.save_routine('{"id": "70000000-0000-0000-0000-000000000001", "name": " Pecho y tríceps ", "exercises": [
+      {"exercise_id": "e0000000-0000-0000-0000-00000000000c", "target_sets": 3, "target_reps_min": 8, "target_reps_max": 12},
+      {"exercise_id": "e0000000-0000-0000-0000-00000000000a"}]}'::jsonb);
+  end loop;
+  assert (select count(*) from public.routines) = 1, 'Crear dos veces con el mismo id no duplica';
+  select exercises into r from public.get_routines('70000000-0000-0000-0000-000000000001');
+  assert (select name from public.get_routines()) = 'Pecho y tríceps', 'Nombre sin espacios sobrantes';
+  assert r -> 0 ->> 'name' = 'Fondos' and (r -> 0 ->> 'target_sets')::int = 3 and (r -> 0 ->> 'target_reps_max')::int = 12
+         and r -> 1 ->> 'name' = 'Press de banca' and r -> 1 -> 'target_sets' = 'null'::jsonb, format('Orden y metas: %s', r);
+
+  -- Usar la rutina: sesión en curso, orden, metas copiadas y cero series. Idempotente.
+  r := public.start_routine_session('70000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000007', '2026-11-27');
+  assert (r ->> 'created')::boolean and r -> 'omitted' = '[]'::jsonb, format('Inicio: %s', r);
+  r := public.start_routine_session('70000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000007', '2026-11-27');
+  assert not (r ->> 'created')::boolean, 'Doble toque: no crea otra sesión';
+  assert (select count(*) from public.workout_sessions where session_date = '2026-11-27') = 1, 'Una sola sesión';
+  r := public.get_workout_session('50000000-0000-0000-0000-000000000007');
+  assert r ->> 'finished_at' is null, 'La sesión nace en curso';
+  assert r -> 'exercises' -> 0 ->> 'name' = 'Fondos' and r -> 'exercises' -> 1 ->> 'name' = 'Press de banca', 'Orden de la rutina';
+  assert (r -> 'exercises' -> 0 ->> 'target_sets')::int = 3 and (r -> 'exercises' -> 0 ->> 'target_reps_min')::int = 8,
+    'Metas copiadas';
+  assert (select count(*) from public.exercise_sets es join public.session_exercises se on se.id = es.session_exercise_id
+          where se.session_id = '50000000-0000-0000-0000-000000000007') = 0, 'Cero series registradas';
+  -- Las metas no cuentan como trabajo: el progreso no incluye la sesión.
+  assert not exists (select 1 from public.get_exercise_progress('e0000000-0000-0000-0000-00000000000c', null, null)),
+    'Las metas no son series';
+
+  -- Registrar series conserva las metas (el editor no las envía).
+  perform public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000007", "session_date": "2026-11-27", "exercises": [
+    {"exercise_id": "e0000000-0000-0000-0000-00000000000a", "sets": []},
+    {"exercise_id": "e0000000-0000-0000-0000-00000000000c", "sets": [{"reps": 10, "weight_kg": null}]}]}'::jsonb);
+  r := public.get_workout_session('50000000-0000-0000-0000-000000000007');
+  assert r -> 'exercises' -> 1 ->> 'name' = 'Fondos' and (r -> 'exercises' -> 1 ->> 'target_reps_max')::int = 12,
+    format('Guardar conserva las metas: %s', r -> 'exercises');
+
+  -- Editar la rutina no cambia la sesión creada con ella.
+  perform public.save_routine('{"id": "70000000-0000-0000-0000-000000000001", "name": "Pecho", "exercises": [
+    {"exercise_id": "e0000000-0000-0000-0000-00000000000a", "target_sets": 5, "target_reps_min": 5, "target_reps_max": 5}]}'::jsonb);
+  r := public.get_workout_session('50000000-0000-0000-0000-000000000007');
+  assert jsonb_array_length(r -> 'exercises') = 2 and r -> 'exercises' -> 0 -> 'target_sets' = 'null'::jsonb
+         and (r -> 'exercises' -> 1 ->> 'target_sets')::int = 3, 'Editar la rutina no toca la sesión';
+
+  -- Ejercicio archivado después de guardar: se puede mantener al editar, se omite al usar.
+  perform public.save_routine('{"id": "70000000-0000-0000-0000-000000000002", "name": "Con archivado", "exercises": [
+    {"exercise_id": "e0000000-0000-0000-0000-00000000000c"}, {"exercise_id": "e0000000-0000-0000-0000-00000000000a"}]}'::jsonb);
+  update public.exercises set archived_at = now() where id = 'e0000000-0000-0000-0000-00000000000c';
+  assert (select (exercises -> 0 ->> 'archived')::boolean from public.get_routines('70000000-0000-0000-0000-000000000002')),
+    'La plantilla identifica el ejercicio archivado';
+  perform public.save_routine('{"id": "70000000-0000-0000-0000-000000000002", "name": "Con archivado 2", "exercises": [
+    {"exercise_id": "e0000000-0000-0000-0000-00000000000c"}, {"exercise_id": "e0000000-0000-0000-0000-00000000000a"}]}'::jsonb);
+  r := public.start_routine_session('70000000-0000-0000-0000-000000000002', '50000000-0000-0000-0000-000000000008', '2026-11-27');
+  assert r -> 'omitted' = '["Fondos"]'::jsonb, format('Omite archivados: %s', r);
+  assert jsonb_array_length(public.get_workout_session('50000000-0000-0000-0000-000000000008') -> 'exercises') = 1, 'Solo activos';
+  -- Todos archivados: no inicia.
+  perform public.save_routine('{"id": "70000000-0000-0000-0000-000000000002", "name": "Solo archivado", "exercises": [
+    {"exercise_id": "e0000000-0000-0000-0000-00000000000c"}]}'::jsonb);
+  ok := false;
+  begin
+    perform public.start_routine_session('70000000-0000-0000-0000-000000000002', '50000000-0000-0000-0000-000000000009', '2026-11-27');
+  exception when check_violation then ok := true;
+  end;
+  assert ok and not exists (select 1 from public.workout_sessions where id = '50000000-0000-0000-0000-000000000009'),
+    'Con todo archivado no se crea la sesión';
+  update public.exercises set archived_at = null where id = 'e0000000-0000-0000-0000-00000000000c';
+
+  -- Eliminar la rutina conserva las sesiones creadas con ella.
+  delete from public.routines where id = '70000000-0000-0000-0000-000000000001';
+  assert exists (select 1 from public.workout_sessions where id = '50000000-0000-0000-0000-000000000007'), 'La sesión se conserva';
+  assert (public.get_workout_session('50000000-0000-0000-0000-000000000007') -> 'exercises' -> 1 ->> 'target_sets')::int = 3,
+    'Con sus metas';
+end $$;
+reset role;
+
+select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
+set role authenticated;
+do $$
+declare ok boolean;
+begin
+  assert not exists (select 1 from public.get_routines()), 'Beto no ve rutinas de Ana';
+  assert (select count(*) from public.routine_exercises) = 0, 'Ni sus ejercicios';
+  ok := false;
+  begin
+    perform public.start_routine_session('70000000-0000-0000-0000-000000000002', '50000000-0000-0000-0000-0000000000b9', '2026-11-27');
+  exception when insufficient_privilege then ok := true;
+  end;
+  assert ok, 'Beto no puede usar una rutina ajena';
+  ok := false;
+  begin
+    perform public.save_routine('{"id": "70000000-0000-0000-0000-000000000002", "name": "Robada", "exercises": [
+      {"exercise_id": "e0000000-0000-0000-0000-00000000000a"}]}'::jsonb);
+  exception when insufficient_privilege or foreign_key_violation then ok := true;
+  end;
+  assert ok, 'Beto no puede sobrescribir una rutina ajena';
+  ok := false;
+  begin
+    perform public.save_routine('{"id": "70000000-0000-0000-0000-0000000000b2", "name": "Con ejercicio ajeno", "exercises": [
+      {"exercise_id": "e0000000-0000-0000-0000-00000000000a"}]}'::jsonb);
+  exception when foreign_key_violation or insufficient_privilege then ok := true;
+  end;
+  assert ok, 'Beto no puede usar ejercicios de Ana en sus rutinas';
+  delete from public.routines;
+  update public.routine_exercises set target_sets = 1;
+end $$;
+reset role;
+do $$
+begin
+  assert (select name from public.routines where id = '70000000-0000-0000-0000-000000000002') = 'Solo archivado',
+    'Los intentos de Beto no tuvieron efecto';
+  assert not exists (select 1 from public.routines where id = '70000000-0000-0000-0000-0000000000b2'), 'Nada a medias';
+  assert not exists (select 1 from public.workout_sessions where id = '50000000-0000-0000-0000-0000000000b9'), 'Sin sesión ajena';
+  -- Limpieza para las pruebas siguientes (cuentan las sesiones de Ana).
+  delete from public.workout_sessions where id in ('50000000-0000-0000-0000-000000000007', '50000000-0000-0000-0000-000000000008');
+  delete from public.routines;
+  delete from public.exercises where id = 'e0000000-0000-0000-0000-00000000000c';
+end $$;
+\echo '   Mis rutinas (validación, uso, metas, archivados, aislamiento): OK'
+
 select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
 set role authenticated;
 do $$

@@ -30,9 +30,21 @@ type Props = {
   title?: string;
   /** Aclaración bajo el título (p. ej., qué se quitará al reemplazar). */
   notice?: string;
+  /** Dónde se agrega lo creado: cambia el texto del botón de crear. */
+  destination?: "sesión" | "rutina";
 };
 
-export function ExercisePicker({ exercises, muscleGroups, inSession, onPick, onCreated, onClose, title, notice }: Props) {
+export function ExercisePicker({
+  exercises,
+  muscleGroups,
+  inSession,
+  onPick,
+  onCreated,
+  onClose,
+  title,
+  notice,
+  destination = "sesión",
+}: Props) {
   const [view, setView] = useState<"list" | "create">("list");
   // Filtro y búsqueda se conservan al volver del formulario de creación.
   const [group, setGroup] = useState<string>(ALL);
@@ -141,7 +153,7 @@ export function ExercisePicker({ exercises, muscleGroups, inSession, onPick, onC
                           <span className="muted small"> · {muscleGroupName(muscleGroups, e.muscle_group_id) ?? UNCLASSIFIED_LABEL}</span>
                         ) : null}
                       </span>
-                      {already ? <span className="badge badge-primary">En la sesión</span> : null}
+                      {already ? <span className="badge badge-primary">En la {destination}</span> : null}
                     </button>
                   </div>
                 );
@@ -183,6 +195,7 @@ export function ExercisePicker({ exercises, muscleGroups, inSession, onPick, onC
             onCreated={onCreated}
             onPick={onPick}
             onCancel={() => setView("list")}
+            destination={destination}
           />
         )}
       </div>
@@ -198,7 +211,9 @@ function CreateExerciseForm({
   onCreated,
   onPick,
   onCancel,
+  destination,
 }: {
+  destination: "sesión" | "rutina";
   muscleGroups: MuscleGroup[];
   catalog: Exercise[];
   initialName: string;
@@ -313,7 +328,7 @@ function CreateExerciseForm({
           Cancelar
         </button>
         <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy}>
-          {busy ? "Creando…" : created ? "Reintentar agregar a la sesión" : "Crear y agregar a la sesión"}
+          {busy ? "Creando…" : created ? `Reintentar agregar a la ${destination}` : `Crear y agregar a la ${destination}`}
         </button>
       </div>
     </form>

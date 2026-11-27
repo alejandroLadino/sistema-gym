@@ -10,16 +10,22 @@ import { isUuid } from "@/lib/validation";
 
 export const metadata: Metadata = { title: "Sesión" };
 
-/** Aviso tras «Repetir ejercicios» (?repetida=AAAA-MM-DD&omitidos=["…"]). */
+/**
+ * Aviso tras «Repetir ejercicios» (?repetida=AAAA-MM-DD) o «Usar rutina» (?rutina=Nombre),
+ * con los ejercicios omitidos por archivados (&omitidos=["…"]).
+ */
 function repeatNotice(sp: Record<string, string | string[] | undefined>): string | undefined {
   const from = typeof sp.repetida === "string" && isIsoDate(sp.repetida) ? sp.repetida : null;
-  if (!from) return undefined;
+  const routine = typeof sp.rutina === "string" && sp.rutina.trim() ? sp.rutina.trim().slice(0, 80) : null;
+  if (!from && !routine) return undefined;
   let omitted: string[] = [];
   try {
     const parsed = typeof sp.omitidos === "string" ? JSON.parse(sp.omitidos) : [];
     if (Array.isArray(parsed)) omitted = parsed.filter((x): x is string => typeof x === "string").slice(0, 20);
   } catch {}
-  const base = `Sesión nueva con los ejercicios del ${formatDate(from, { weekday: false })}. Registra tus series; las anteriores se muestran como referencia.`;
+  const base = routine
+    ? `Sesión nueva con la rutina «${routine}». Registra tus series; las metas y la última vez son solo referencia.`
+    : `Sesión nueva con los ejercicios del ${formatDate(from!, { weekday: false })}. Registra tus series; las anteriores se muestran como referencia.`;
   return omitted.length
     ? `${base} Se ${omitted.length === 1 ? "omitió" : "omitieron"} por estar ${omitted.length === 1 ? "archivado" : "archivados"}: ${omitted.join(", ")}.`
     : base;
