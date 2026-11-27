@@ -6,8 +6,10 @@ Construir una aplicación web en español para registrar entrenamientos, reutili
 ejercicios y consultar el progreso de cada persona. La experiencia principal es
 registrar series desde el celular mientras la persona está entrenando.
 
-En la primera versión, una rutina es el conjunto de ejercicios que el usuario
-realizó en una sesión. Las plantillas de rutinas quedan para una fase posterior.
+Además de registrar sesiones, el usuario puede guardar rutinas en «Mis rutinas»:
+plantillas personales con ejercicios en orden y metas opcionales de series y
+repeticiones, que sirven para iniciar una sesión nueva. Una sesión creada con una
+rutina conserva las metas que tenía al iniciarla, aunque la rutina cambie después.
 
 ## Usuarios y accesos
 
@@ -68,8 +70,10 @@ ambas sesiones. Para peso corporal se muestran repeticiones en el historial.
   falló el guardado. Permitir reintentar sin duplicar registros.
 - El MVP abarca acceso, administración de cuentas, catálogo personal de
   ejercicios, registro de sesiones, historial y progreso básico.
-- Las plantillas, los entrenadores, las membresías, los pagos y los planes
-  de alimentación quedan para fases posteriores.
+- Además del MVP ya están implementadas las rutinas («Mis rutinas»), con acceso
+  desde Inicio.
+- Los entrenadores, las membresías, los pagos y los planes de alimentación
+  quedan para fases posteriores.
 
 ## Idioma
 
