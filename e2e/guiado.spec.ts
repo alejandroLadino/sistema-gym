@@ -348,5 +348,22 @@ test("Cambiar ejercicio, entrenamiento guiado y series alternadas (375 px)", asy
   await page.goto("/rutinas");
   await expect(page.getByRole("listitem", { name: "Pecho alternado" })).toContainText(MANC);
   await expect(page.getByRole("listitem", { name: "Pecho alternado" })).not.toContainText(BARRA);
+
+  // Eliminar un entrenamiento en curso desde el modo guiado (confirmación propia de la app).
+  await page.getByRole("button", { name: "Usar rutina Pecho alternado" }).click();
+  const enCurso = page.getByRole("dialog", { name: /entrenamiento en curso/ });
+  if (await enCurso.isVisible().catch(() => false)) await enCurso.getByRole("button", { name: "Iniciar otra con esta rutina" }).click();
+  await expect(page).toHaveURL(/\/sesiones\//);
+  const borrar = page.url();
+  await page.getByRole("button", { name: "Iniciar entrenamiento" }).click();
+  await saved(page);
+  await page.getByRole("button", { name: "Acciones del entrenamiento" }).click();
+  await page.getByRole("menuitem", { name: "Eliminar entrenamiento" }).click();
+  const eliminar = page.getByRole("dialog", { name: "¿Eliminar este entrenamiento?" });
+  await expect(eliminar).toContainText("No se puede deshacer");
+  await eliminar.getByRole("button", { name: "Eliminar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial/);
+  await page.goto(borrar);
+  await expect(page.getByRole("heading", { name: "No encontrado" })).toBeVisible();
   await context.close();
 });

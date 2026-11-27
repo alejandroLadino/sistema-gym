@@ -1265,13 +1265,15 @@ test("Sesiones: quitar el último ejercicio y «Última vez» tras repetir (375 
       ? route.fulfill({ status: 500, body: "fallo simulado" })
       : route.continue(),
   );
+  const confirmarEliminar = page.getByRole("dialog", { name: "¿Eliminar este entrenamiento?" });
   await quitar("Martillo E");
   await dialogo.getByRole("button", { name: "Eliminar sesión" }).click();
-  await expect(page.locator(".alert-error")).toContainText("La sesión no se eliminó");
+  await confirmarEliminar.getByRole("button", { name: "Eliminar sesión" }).click();
+  // El error se ve en el mismo panel y se puede reintentar.
+  await expect(confirmarEliminar.locator(".alert-error")).toContainText("La sesión no se eliminó");
   await expect(page).toHaveURL(new RegExp(`/sesiones/${enCursoId}$`));
   await page.unroute("**/*");
-  await quitar("Martillo E");
-  await dialogo.getByRole("button", { name: "Eliminar sesión" }).click();
+  await confirmarEliminar.getByRole("button", { name: "Reintentar eliminar" }).click();
   await expect(page).toHaveURL(/\/historial/);
   await expect(page.getByText("Sesión eliminada.")).toBeVisible();
   await expect(page.getByText("Todavía no tienes sesiones.")).toBeVisible();
@@ -1703,6 +1705,7 @@ test("Inicio: «Tu constancia», racha semanal, rutinas y barra flotante (375 px
   // Eliminar la de hoy: la semana actual queda sin actividad → racha pendiente (1 semana).
   await page.goto(`/sesiones/${s1}`);
   await page.getByRole("button", { name: "Eliminar sesión" }).click();
+  await page.getByRole("dialog", { name: "¿Eliminar este entrenamiento?" }).getByRole("button", { name: "Eliminar sesión" }).click();
   await expect(page).toHaveURL(/\/historial/);
   await inicio();
   await expect(stats).toHaveText(["0 días", "—", "1 día"]);

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { IconCheck, IconChevronDown, IconList, IconPencil, IconPlus } from "@/components/icons";
+import { ActionsMenu } from "@/components/ActionsMenu";
+import { IconCheck, IconChevronDown, IconList, IconPencil, IconPlus, IconTrash } from "@/components/icons";
 import { blocksToDraft, cloneBlocks, loadOf, newKey, parseDraftSet, type DraftBlocks, type DraftExercise, type DraftSet, type LoadMode } from "@/lib/session-draft";
 import { formatDate, formatSet, summarizeSets } from "@/lib/format";
 import { altTurns, currentTurnIndex, progressText, registeredSets, stepComplete, stepExerciseKeys, type Step } from "@/lib/guided";
@@ -27,6 +28,8 @@ type Props = {
   onExit: () => void;
   onFinishSession: () => void;
   finishing: boolean;
+  /** «Eliminar entrenamiento» (pide confirmación). */
+  onDelete: () => void;
 };
 
 /** Tiempo en que un segundo toque de «Registrar serie» / «Guardar y seguir» se ignora. */
@@ -82,6 +85,10 @@ export function GuidedView(props: Props) {
         </button>
         <span className="guided-count" aria-live="polite">{index + 1} de {steps.length} ejercicios</span>
         {status}
+        <ActionsMenu
+          label="Acciones del entrenamiento"
+          items={[{ label: "Eliminar entrenamiento", icon: <IconTrash />, danger: true, onSelect: props.onDelete }]}
+        />
       </div>
 
       <section
