@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useRef, useState, useSyncExternalStore } from "react";
 import { repeatSession } from "@/app/actions/sessions";
 import { IconCalendar, IconCheck, IconChevronRight, IconClock, IconFlame, IconPlus } from "@/components/icons";
-import { consistency as computeConsistency, type ConsistencyRow } from "@/lib/consistency";
+import { consistency as computeConsistency, MIN_STREAK_WEEKS, type ConsistencyRow } from "@/lib/consistency";
 import { muscleGroupName } from "@/lib/muscle-group-utils";
 import type { Routine } from "@/lib/routines";
 import type { MuscleGroup } from "@/lib/types";
@@ -51,6 +51,8 @@ export function HomeDashboard({ userId, firstName, serverToday, sessions, consis
   const primary = primaryAction(sessions, today, localDraft);
   const others = otherInProgress(sessions, primary);
   const stats = computeConsistency(consistency, today);
+  // La racha semanal se muestra desde 2 semanas seguidas; antes, una indicación.
+  const showStreak = stats.streak >= MIN_STREAK_WEEKS;
   const starter = useRoutineStarter({ sessions, today });
   const recent = recentFinished(sessions, 3);
   const current = inProgressToday(sessions, today);
@@ -158,11 +160,12 @@ export function HomeDashboard({ userId, firstName, serverToday, sessions, consis
       <section className="card consistency-card" aria-labelledby="constancia-titulo">
         <div className="consistency-head">
           <h2 id="constancia-titulo">Tu constancia</h2>
-          <span className="streak-badge" data-pending={stats.pending || undefined} data-zero={stats.streak === 0 || undefined}>
+          {/* El fueguito acumula los días entrenados mientras la racha semanal siga viva. */}
+          <span className="streak-badge" data-pending={stats.pending || undefined} data-zero={stats.streakDays === 0 || undefined}>
             <IconFlame />
             <span>
-              {plural(stats.streak, "semana", "semanas")}
-              <span className="sr-only"> de racha{stats.pending ? ", pendiente esta semana" : ""}</span>
+              {plural(stats.streakDays, "día", "días")}
+              <span className="sr-only"> entrenados en tu racha{stats.pending ? ", pendiente esta semana" : ""}</span>
             </span>
           </span>
         </div>
@@ -171,21 +174,28 @@ export function HomeDashboard({ userId, firstName, serverToday, sessions, consis
             <dt>Esta semana</dt>
             <dd>{plural(stats.weekDays, "día", "días")}</dd>
           </div>
-          <div data-accent>
+          <div data-accent data-empty={!showStreak || undefined}>
             <dt>Racha semanal</dt>
-            <dd>{plural(stats.streak, "semana", "semanas")}</dd>
+            <dd>{showStreak ? plural(stats.streak, "semana", "semanas") : "—"}</dd>
           </div>
           <div>
             <dt>Total</dt>
             <dd>{plural(stats.totalDays, "día", "días")}</dd>
           </div>
         </dl>
-        {stats.pending ? (
+        {stats.pending && showStreak ? (
           <p className="consistency-note" data-pending>
-            <IconClock /> Pendiente: entrena antes del domingo para mantener tu racha de {plural(stats.streak, "semana", "semanas")}.
+            <IconClock /> Pendiente: entrena antes del domingo para mantener tu racha de{" "}
+            {plural(stats.streak, "semana", "semanas")} ({plural(stats.streakDays, "día", "días")}).
+          </p>
+        ) : stats.pending ? (
+          <p className="consistency-note" data-pending>
+            <IconClock /> Entrena antes del domingo para iniciar tu racha semanal.
           </p>
         ) : stats.streak === 0 ? (
-          <p className="consistency-note">Entrena al menos un día esta semana para empezar tu racha.</p>
+          <p className="consistency-note">Entrena al menos un día esta semana para empezar.</p>
+        ) : !showStreak ? (
+          <p className="consistency-note">Entrena la próxima semana para iniciar tu racha.</p>
         ) : null}
         <ol className="week-strip" aria-label="Días de esta semana">
           {stats.days.map((d, i) => {

@@ -852,7 +852,7 @@ test("Inicio: hoy, semana, sesiones recientes y repetir ejercicios (375 px)", as
   // Usuario nuevo: la acción principal se ve al entrar.
   const hoy = page.locator(".today-card");
   await expect(hoy.getByRole("link", { name: "Iniciar entrenamiento" })).toBeInViewport();
-  await expect(page.locator(".consistency-stats dd")).toHaveText(["0 días", "0 semanas", "0 días"]);
+  await expect(page.locator(".consistency-stats dd")).toHaveText(["0 días", "—", "0 días"]);
   await expect(page.locator('.week-day[aria-current="date"]')).toHaveCount(1);
   await expect(page.locator(".week-day[data-trained]")).toHaveCount(0);
   await expect(page.getByText("Aún no tienes sesiones finalizadas.")).toBeVisible();
@@ -904,7 +904,7 @@ test("Inicio: hoy, semana, sesiones recientes y repetir ejercicios (375 px)", as
   await expect(hoy.getByRole("link", { name: "Nueva sesión" })).toBeVisible();
   // Constancia: hoy cuenta como día entrenado. La de hace 10 días cae en la semana anterior
   // (racha de 2) si hoy es de jueves a domingo; si no, dos semanas atrás (racha de 1).
-  const racha = (new Date().getDay() + 6) % 7 >= 3 ? "2 semanas" : "1 semana";
+  const racha = (new Date().getDay() + 6) % 7 >= 3 ? "2 semanas" : "—";
   await expect(page.locator(".consistency-stats dd")).toHaveText(["1 día", racha, "2 días"]);
   await expect(page.locator('.week-day[aria-current="date"][data-trained]')).toHaveCount(1);
   // Abrir una sesión finalizada muestra su estado.
@@ -1638,11 +1638,12 @@ test("Inicio: «Tu constancia», racha semanal, rutinas y barra flotante (375 px
 
   // Usuario nuevo: cero días, semana vacía y la acción principal visible al entrar.
   await expect(page.locator(".today-card").getByRole("link", { name: "Iniciar entrenamiento" })).toBeInViewport();
-  await expect(stats).toHaveText(["0 días", "0 semanas", "0 días"]);
+  await expect(stats).toHaveText(["0 días", "—", "0 días"]);
+  await expect(page.locator(".streak-badge")).toHaveText("0 días entrenados en tu racha");
   await expect(page.locator(".week-day[data-trained]")).toHaveCount(0);
   await expect(hoyDot).toHaveCount(1);
   await expect(hoyDot).toContainText("hoy: sin entrenamiento");
-  await expect(page.getByText("Entrena al menos un día esta semana para empezar tu racha.")).toBeVisible();
+  await expect(page.getByText("Entrena al menos un día esta semana para empezar.")).toBeVisible();
   await shot(page, "18a-constancia-nuevo");
 
   const registrar = async (name: string, opts: { create?: string; date?: string; sets?: boolean } = {}) => {
@@ -1666,14 +1667,16 @@ test("Inicio: «Tu constancia», racha semanal, rutinas y barra flotante (375 px
   // En curso con series: todavía no cuenta.
   const s1 = await registrar("Sentadilla H", { create: "Cuádriceps" });
   await inicio();
-  await expect(stats).toHaveText(["0 días", "0 semanas", "0 días"]);
+  await expect(stats).toHaveText(["0 días", "—", "0 días"]);
   // Finalizada: cuenta hoy.
   await page.goto(`/sesiones/${s1}`);
   await finalizar();
   await inicio();
-  await expect(stats).toHaveText(["1 día", "1 semana", "1 día"]);
+  // Un día: el fueguito suma 1 día; la racha semanal se muestra desde 2 semanas.
+  await expect(stats).toHaveText(["1 día", "—", "1 día"]);
   await expect(hoyDot).toContainText("hoy: entrenado");
-  await expect(page.locator(".streak-badge")).toContainText("1 semana");
+  await expect(page.locator(".streak-badge")).toHaveText("1 día entrenados en tu racha");
+  await expect(page.locator(".consistency-note")).toHaveText("Entrena la próxima semana para iniciar tu racha.");
   // Segunda sesión válida el mismo día: sigue siendo un día.
   const s2 = await registrar("Sentadilla H");
   await finalizar();
@@ -1681,7 +1684,7 @@ test("Inicio: «Tu constancia», racha semanal, rutinas y barra flotante (375 px
   await registrar("Sentadilla H", { date: isoDaysAgo(10), sets: false });
   await finalizar();
   await inicio();
-  await expect(stats).toHaveText(["1 día", "1 semana", "1 día"]);
+  await expect(stats).toHaveText(["1 día", "—", "1 día"]);
   await expect(page.locator(".week-day[data-trained]")).toHaveCount(1);
   await shot(page, "18b-constancia-hoy");
 
@@ -1691,17 +1694,18 @@ test("Inicio: «Tu constancia», racha semanal, rutinas y barra flotante (375 px
   await saved(page);
   await inicio();
   await expect(stats).toHaveText(["1 día", "2 semanas", "2 días"]);
+  await expect(page.locator(".streak-badge")).toHaveText("2 días entrenados en tu racha");
+  await expect(page.locator(".consistency-note")).toHaveCount(0);
 
   // Eliminar la de hoy: la semana actual queda sin actividad → racha pendiente (1 semana).
   await page.goto(`/sesiones/${s1}`);
   await page.getByRole("button", { name: "Eliminar sesión" }).click();
   await expect(page).toHaveURL(/\/historial/);
   await inicio();
-  await expect(stats).toHaveText(["0 días", "1 semana", "1 día"]);
-  await expect(page.locator(".consistency-note")).toHaveText(
-    "Pendiente: entrena antes del domingo para mantener tu racha de 1 semana.",
-  );
+  await expect(stats).toHaveText(["0 días", "—", "1 día"]);
+  await expect(page.locator(".consistency-note")).toHaveText("Entrena antes del domingo para iniciar tu racha semanal.");
   await expect(page.locator(".streak-badge")).toHaveAttribute("data-pending", "true");
+  await expect(page.locator(".streak-badge")).toHaveText("1 día entrenados en tu racha, pendiente esta semana");
   await shot(page, "18c-constancia-pendiente");
 
   // Reloj del dispositivo: el domingo de esta semana la racha sigue pendiente; el lunes
@@ -1712,13 +1716,14 @@ test("Inicio: «Tu constancia», racha semanal, rutinas y barra flotante (375 px
   await page.clock.setFixedTime(domingo);
   await inicio();
   await expect(hoyDot.locator(".week-letter")).toHaveText("D");
-  await expect(stats).toHaveText(["0 días", "1 semana", "1 día"]);
+  await expect(stats).toHaveText(["0 días", "—", "1 día"]);
   await expect(page.locator(".streak-badge")).toHaveAttribute("data-pending", "true");
   await page.clock.setFixedTime(lunes);
   await inicio();
   await expect(hoyDot.locator(".week-letter")).toHaveText("L");
-  await expect(stats).toHaveText(["0 días", "0 semanas", "1 día"]);
+  await expect(stats).toHaveText(["0 días", "—", "1 día"]);
   await expect(page.locator(".streak-badge")).toHaveAttribute("data-zero", "true");
+  await expect(page.locator(".streak-badge")).toHaveText("0 días entrenados en tu racha");
 
   // Volver a la fecha real. «Mis rutinas» en Inicio: crear, ver y usar una rutina.
   await page.clock.setFixedTime(base);

@@ -793,3 +793,4 @@ html.is-dragging-card, html.is-dragging-card * { -webkit-user-select: none; user
 .step-fields[data-cols="1"] { grid-template-columns: 1fr; }
 .step-fields .input { text-align: center; font-size: 1.1rem; font-weight: 700; }
 .step-remove { justify-self: start; color: var(--danger); }
+.consistency-stats > div[data-empty] dd { color: var(--muted); }
