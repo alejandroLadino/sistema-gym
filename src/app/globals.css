@@ -876,3 +876,7 @@ html.is-dragging-card, html.is-dragging-card * { -webkit-user-select: none; user
 .guided-capture .load-picker-title { display: none; }
 .guided-capture .input.input-lg { min-height: 52px; scroll-margin-bottom: 180px; }
 .guided-capture .field { gap: 2px; }
+.guided-top { gap: 6px; }
+.guided-top .guided-count { white-space: normal; min-width: 0; line-height: 1.15; }
+.guided-top > :last-child { flex: none; }
+.guided-top .btn-sm { padding: 0 10px; }

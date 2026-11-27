@@ -134,6 +134,8 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
   /** Ejercicio que se reemplaza con el selector (null = el selector agrega). */
   const [replaceTarget, setReplaceTarget] = useState<DraftExercise | null>(null);
   const [deleting, setDeleting] = useState(false);
+  /** Confirmación de «Eliminar sesión» (con el error, si falló). */
+  const [deleteAsk, setDeleteAsk] = useState<{ error: string | null } | null>(null);
   /** Ejercicios colapsados (solo muestran nombre y resumen). */
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   /** Lista de ejercicios o entrenamiento guiado (misma sesión). */
@@ -553,36 +555,57 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
     router.refresh();
   }
 
-  function discard() {
+  function discard(confirmed = false) {
     if (!draft) return;
     const hasData = draft.exercises.length > 0;
-    if (hasData && !window.confirm("¿Descartar este entrenamiento sin guardar?")) return;
+    if (hasData && !confirmed) {
+      setDeleteAsk({ error: null });
+      return;
+    }
     blocked.current = true;
     removeStoredDraft(draft.id);
     clearNewPointer(draft.id);
     router.push("/");
   }
 
-  /** Elimina la sesión; el éxito solo se muestra cuando el servidor lo confirma. */
-  async function remove() {
-    if (!draft || deleting || !window.confirm("¿Eliminar esta sesión? No se puede deshacer.")) return;
+  /**
+   * «Eliminar sesión»: abre una confirmación propia de la app (no depende de los
+   * diálogos del navegador, que algunos navegadores bloquean sin avisar).
+   */
+  function remove() {
+    if (!draft || deleting) return;
     setLastExercise(null);
+    setDeleteAsk({ error: null });
+  }
+
+  /** Elimina la sesión; el éxito solo se muestra cuando el servidor lo confirma. */
+  async function confirmRemove() {
+    if (!draft || deleting) return;
+    // Sesión nueva que aún no se guardó en el servidor: solo se descarta en este dispositivo.
+    if (!savedOnce.current) {
+      setDeleteAsk(null);
+      discard(true);
+      return;
+    }
     setDeleting(true);
+    setDeleteAsk({ error: null });
     // Mientras tanto no se autoguarda (no debe recrearla).
     blocked.current = true;
     if (timer.current) clearTimeout(timer.current);
+    // Un guardado en curso podría volver a crearla después de borrarla: se espera a que termine.
+    for (let i = 0; inFlight.current && i < 100; i++) await new Promise((res) => setTimeout(res, 100));
     let ok = false;
+    let error = "Sin conexión con el servidor. La sesión no se eliminó; reintenta.";
     try {
       const res = await deleteSession(draft.id);
       ok = res.ok;
-      if (!res.ok) setErrorMsg(res.error);
-    } catch {
-      setErrorMsg("Sin conexión con el servidor. La sesión no se eliminó; reintenta.");
-    }
+      if (!res.ok) error = res.error;
+    } catch {}
     if (!ok) {
       blocked.current = false;
-      setShowErrors(true);
       setDeleting(false);
+      // El error se muestra en el mismo panel, a la vista.
+      setDeleteAsk({ error });
       return;
     }
     removeStoredDraft(draft.id);
@@ -757,6 +780,23 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
     ) : null;
 
   const pending = pendingExercises(draft.exercises);
+  const deleteSheet = deleteAsk ? (
+    <div className="sheet-backdrop" onClick={() => !deleting && setDeleteAsk(null)}>
+      <div className="sheet stack" role="dialog" aria-modal="true" aria-labelledby="eliminar-titulo" onClick={(e) => e.stopPropagation()}>
+        <h2 id="eliminar-titulo" style={{ margin: 0 }}>¿Eliminar este entrenamiento?</h2>
+        <p className="muted" style={{ margin: 0 }}>
+          Se borrará la sesión del {formatDate(draft.date)} con sus ejercicios y series. No se puede deshacer.
+        </p>
+        {deleteAsk.error ? <p className="alert alert-error" role="alert" style={{ margin: 0 }}>{deleteAsk.error}</p> : null}
+        <button type="button" className="btn btn-danger btn-block" onClick={() => void confirmRemove()} disabled={deleting}>
+          <IconTrash /> {deleting ? "Eliminando…" : deleteAsk.error ? "Reintentar eliminar" : "Eliminar sesión"}
+        </button>
+        <button type="button" className="btn btn-ghost btn-block" onClick={() => setDeleteAsk(null)} disabled={deleting}>
+          Cancelar
+        </button>
+      </div>
+    </div>
+  ) : null;
   const summarySheet = finishSummary ? (
     <div className="sheet-backdrop" onClick={() => setFinishSummary(false)}>
       <div className="sheet stack" role="dialog" aria-modal="true" aria-labelledby="resumen-titulo" onClick={(e) => e.stopPropagation()}>
@@ -806,8 +846,10 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
           onExit={() => openView("list")}
           onFinishSession={() => void finish()}
           finishing={finishing}
+          onDelete={isNew ? () => discard() : remove}
         />
         {summarySheet}
+        {deleteSheet}
       </div>
     );
   }
@@ -1206,9 +1248,9 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
 
         <div className="row" style={{ marginTop: 8 }}>
           {isNew ? (
-            <button type="button" className="btn btn-ghost" onClick={discard}>Descartar</button>
+            <button type="button" className="btn btn-ghost" onClick={() => discard()}>Descartar</button>
           ) : (
-            <button type="button" className="btn btn-danger" onClick={() => void remove()} disabled={deleting}>
+            <button type="button" className="btn btn-danger" onClick={remove} disabled={deleting}>
               <IconTrash /> {deleting ? "Eliminando…" : "Eliminar sesión"}
             </button>
           )}
@@ -1240,7 +1282,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
             >
               Reemplazar ejercicio
             </button>
-            <button type="button" className="btn btn-danger btn-block" onClick={() => void remove()} disabled={deleting}>
+            <button type="button" className="btn btn-danger btn-block" onClick={remove} disabled={deleting}>
               {deleting ? "Eliminando…" : "Eliminar sesión"}
             </button>
             <button type="button" className="btn btn-ghost btn-block" onClick={() => setLastExercise(null)}>
@@ -1264,6 +1306,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
       ) : null}
 
       {summarySheet}
+      {deleteSheet}
 
       {altFor ? (
         <AlternateSheet
