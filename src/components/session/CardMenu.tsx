@@ -1,10 +1,21 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { IconMore, IconTrash } from "@/components/icons";
+import { IconChevronDown, IconMore, IconTrash } from "@/components/icons";
 
-/** Menú «⋯» de una tarjeta de ejercicio. Por ahora: «Quitar de la sesión». */
-export function CardMenu({ exerciseName, onRemove }: { exerciseName: string; onRemove: () => void }) {
+/** Menú «⋯» de una tarjeta de ejercicio: mover (alternativa accesible al arrastre) y quitar. */
+export function CardMenu({
+  exerciseName,
+  onRemove,
+  onMoveUp,
+  onMoveDown,
+}: {
+  exerciseName: string;
+  onRemove: () => void;
+  /** null: no se puede mover en esa dirección (primero / último). */
+  onMoveUp?: (() => void) | null;
+  onMoveDown?: (() => void) | null;
+}) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const firstItemRef = useRef<HTMLButtonElement>(null);
@@ -47,8 +58,36 @@ export function CardMenu({ exerciseName, onRemove }: { exerciseName: string; onR
       </button>
       {open ? (
         <div id={menuId} className="card-menu-list" role="menu" aria-label={`Acciones de ${exerciseName}`}>
+          {onMoveUp ? (
+            <button
+              ref={firstItemRef}
+              type="button"
+              role="menuitem"
+              className="card-menu-item"
+              onClick={() => {
+                setOpen(false);
+                onMoveUp();
+              }}
+            >
+              <span className="icon-up" aria-hidden="true"><IconChevronDown /></span> Mover arriba
+            </button>
+          ) : null}
+          {onMoveDown ? (
+            <button
+              ref={onMoveUp ? undefined : firstItemRef}
+              type="button"
+              role="menuitem"
+              className="card-menu-item"
+              onClick={() => {
+                setOpen(false);
+                onMoveDown();
+              }}
+            >
+              <IconChevronDown /> Mover abajo
+            </button>
+          ) : null}
           <button
-            ref={firstItemRef}
+            ref={onMoveUp || onMoveDown ? undefined : firstItemRef}
             type="button"
             role="menuitem"
             className="card-menu-item danger"

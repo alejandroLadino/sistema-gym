@@ -2000,6 +2000,197 @@ test("Series por bloques: Smith, Peck deck, corrección, Progreso, copia y rutin
   await context.close();
 });
 
+test("Reordenar ejercicios: arrastre táctil y con mouse, menú, cancelación, scroll y rutina (375 px)", async ({ browser }) => {
+  const userK = { email: `kai.${run}@example.com`, temp: "Temporal159", final: "KaiSegura753" };
+  const admin = await newPage(browser);
+  await login(admin, ADMIN_EMAIL, ADMIN_PASSWORD);
+  await admin.goto("/admin");
+  const form = admin.getByRole("form", { name: "Crear cuenta" });
+  await form.getByLabel("Correo").fill(userK.email);
+  await form.getByLabel("Contraseña inicial").fill(userK.temp);
+  await form.getByRole("button", { name: "Crear cuenta" }).click();
+  await expect(form.getByText(`Cuenta creada para ${userK.email}`)).toBeVisible();
+  await admin.context().close();
+
+  const context = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  page.on("dialog", (d) => d.accept());
+  await login(page, userK.email, userK.temp);
+  await page.getByLabel("Nueva contraseña", { exact: true }).fill(userK.final);
+  await page.getByLabel("Repite la nueva contraseña").fill(userK.final);
+  await page.getByRole("button", { name: "Guardar contraseña" }).click();
+  await expect(page).toHaveURL(/\/$/);
+
+  const PRESS = "Press inclinado K";
+  const PECK = "Peck deck K";
+  const REMO = "Remo K";
+  const titulos = page.locator(".exercise-card h3");
+  const status = page.locator(".save-status");
+  const cdp = await context.newCDPSession(page);
+  const touch = (type: "touchStart" | "touchMove" | "touchEnd" | "touchCancel", x = 0, y = 0) =>
+    cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" || type === "touchCancel" ? [] : [{ x, y }] });
+  const centro = async (name: string) => {
+    // Lleva el tirador al centro de la pantalla (la barra inferior flotante tapa el borde).
+    await page.getByRole("button", { name: `Reordenar ${name}` }).evaluate((el) => el.scrollIntoView({ block: "center" }));
+    const b = (await page.getByRole("button", { name: `Reordenar ${name}` }).boundingBox())!;
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+  /** Presión larga en el tirador y arrastre vertical hasta `toY` (coordenadas de la ventana). */
+  const arrastrar = async (name: string, toY: number, fin: "touchEnd" | "touchCancel" = "touchEnd", espera = 0) => {
+    const { x, y } = await centro(name);
+    await touch("touchStart", x, y);
+    await page.waitForTimeout(400); // presión larga
+    for (let i = 1; i <= 12; i++) await touch("touchMove", x, y + ((toY - y) * i) / 12);
+    if (espera) await page.waitForTimeout(espera);
+    await touch(fin);
+  };
+  const quick = async (name: string, reps: string, weight: string) => {
+    const card = page.getByRole("region", { name });
+    await card.getByLabel(`Repeticiones por serie de ${name}`).fill(reps);
+    await card.getByLabel(`Peso por serie de ${name}`, { exact: false }).fill(weight);
+    await card.getByRole("button", { name: "Agregar 3 series" }).click();
+  };
+
+  // Sesión: Press inclinado (simple), Peck deck (por bloques) y Remo (simple).
+  await page.goto("/entrenar");
+  await addExercise(page, PRESS, { create: true, muscle: "Pecho" });
+  await expect(page.getByRole("button", { name: `Reordenar ${PRESS}` })).toHaveCount(0); // con un solo ejercicio no hay tirador
+  await quick(PRESS, "10", "30");
+  await addExercise(page, PECK, { create: true, muscle: "Pecho" });
+  await page.getByRole("region", { name: PECK }).getByRole("button", { name: "Agregar serie por bloques" }).click();
+  const sheet = page.getByRole("dialog", { name: "Serie por bloques" });
+  await sheet.getByRole("button", { name: "Reps + sostén" }).click();
+  await sheet.getByLabel("Repeticiones del paso 1").fill("7");
+  await sheet.getByRole("button", { name: /^Paso 2:/ }).click();
+  await sheet.getByLabel("Segundos del paso 2").fill("7");
+  await sheet.getByLabel("Vueltas por serie").fill("3");
+  await sheet.getByLabel("Series a agregar").fill("2");
+  await sheet.getByRole("button", { name: "Agregar 2 series" }).click();
+  await addExercise(page, REMO, { create: true, muscle: "Espalda" });
+  await quick(REMO, "12", "40");
+  await saved(page);
+  const sesion = page.url().split("/").pop()!;
+  await expect(titulos).toHaveText([PRESS, PECK, REMO]);
+
+  // Tirador: área táctil cómoda, etiqueta accesible y sin desplazar la página.
+  const tirador = page.getByRole("button", { name: `Reordenar ${PECK}` });
+  const caja = (await tirador.boundingBox())!;
+  expect(Math.min(caja.width, caja.height)).toBeGreaterThanOrEqual(44);
+  expect(await tirador.evaluate((el) => getComputedStyle(el).touchAction)).toBe("none");
+  expect(await page.getByRole("region", { name: REMO }).evaluate((el) => getComputedStyle(el).touchAction)).toBe("auto");
+
+  // Con cambios pendientes y la tarjeta de Press expandida: Peck deck por encima de Press inclinado.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expand(page, PRESS);
+  await page.getByLabel(`Peso serie 1 de ${PRESS}`, { exact: false }).fill("32,5");
+  await expect(status).toHaveText("Sin guardar");
+  const p = await centro(PECK);
+  const borde = (await page.locator(".session-head").boundingBox())!;
+  const arriba = borde.y + borde.height + 16;
+  await touch("touchStart", p.x, p.y);
+  await page.waitForTimeout(400);
+  for (let i = 1; i <= 8; i++) await touch("touchMove", p.x, p.y + ((arriba - p.y) * i) / 12);
+  // Durante el arrastre: tarjeta elevada y marcador del hueco.
+  await expect(page.getByRole("region", { name: PECK })).toHaveAttribute("data-dragging", "true");
+  await expect(page.locator(".drop-slot")).toBeVisible();
+  await shot(page, "21a-arrastrando");
+  for (let i = 9; i <= 12; i++) await touch("touchMove", p.x, p.y + ((arriba - p.y) * i) / 12);
+  await page.waitForTimeout(1500); // desplazamiento automático hasta Press inclinado
+  await touch("touchEnd");
+  await expect(titulos).toHaveText([PECK, PRESS, REMO]);
+  await expect(page.locator(".drop-slot")).toHaveCount(0);
+  await saved(page);
+  await page.reload();
+  await expect(titulos).toHaveText([PECK, PRESS, REMO]);
+  await expand(page, PRESS);
+  await expect(page.getByLabel(`Peso serie 1 de ${PRESS}`, { exact: false })).toHaveValue("32,5");
+  await expect(page.getByLabel(`Peso serie 2 de ${PRESS}`, { exact: false })).toHaveValue("30");
+  await expand(page, PECK);
+  await expect(page.getByRole("region", { name: PECK }).locator(".block-set-totals")).toHaveText([
+    "Serie 1 · 21 reps · 21 s de sostén",
+    "Serie 2 · 21 reps · 21 s de sostén",
+  ]);
+  await expect(page.getByRole("region", { name: REMO }).locator(".ex-summary")).toHaveText("3 series · Mejor serie: 40 kg × 12");
+
+  // Cancelar el gesto (pointercancel) o un toque corto no cambia el orden.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await arrastrar(REMO, 150, "touchCancel");
+  await expect(titulos).toHaveText([PECK, PRESS, REMO]);
+  const r = await centro(REMO);
+  await touch("touchStart", r.x, r.y);
+  for (let i = 1; i <= 6; i++) await touch("touchMove", r.x, r.y - i * 20); // se mueve antes de la presión larga
+  await touch("touchEnd");
+  await expect(titulos).toHaveText([PECK, PRESS, REMO]);
+
+  // Scroll normal: deslizar sobre la tarjeta (fuera del tirador) desplaza la página sin reordenar.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  // Deslizar el dedo sobre el cuerpo de una tarjeta (no sobre el tirador).
+  const cuerpo = (await page.getByRole("region", { name: PRESS }).boundingBox())!;
+  const sx = cuerpo.x + 80;
+  const sy = Math.min(cuerpo.y + 120, 450);
+  await touch("touchStart", sx, sy);
+  for (let i = 1; i <= 10; i++) await touch("touchMove", sx, sy - i * 25);
+  await touch("touchEnd");
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(50);
+  await expect(titulos).toHaveText([PECK, PRESS, REMO]);
+
+  // Alternativa accesible en el menú «⋯»: «Mover arriba» / «Mover abajo».
+  await page.getByRole("button", { name: `Acciones de ${PECK}` }).click();
+  await expect(page.getByRole("menuitem", { name: "Mover arriba" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: `Acciones de ${REMO}` }).click();
+  await page.getByRole("menuitem", { name: "Mover arriba" }).click();
+  await expect(titulos).toHaveText([PECK, REMO, PRESS]);
+  await page.getByRole("button", { name: `Acciones de ${REMO}` }).click();
+  await page.getByRole("menuitem", { name: "Mover abajo" }).click();
+  await expect(titulos).toHaveText([PECK, PRESS, REMO]);
+  await expect(page.getByRole("status").filter({ hasText: `${REMO} movido a la posición 3 de 3.` })).toHaveCount(1);
+  await saved(page);
+
+  // Lista larga con tarjetas expandidas: arrastrar Remo al principio con desplazamiento automático.
+  await page.setViewportSize({ width: 375, height: 460 });
+  await expand(page, REMO);
+  await page.getByRole("button", { name: `Reordenar ${REMO}` }).scrollIntoViewIfNeeded();
+  const antes = await page.evaluate(() => window.scrollY);
+  expect(antes).toBeGreaterThan(200);
+  const cabecera = (await page.locator(".session-head").boundingBox())!;
+  await arrastrar(REMO, cabecera.y + cabecera.height + 12, "touchEnd", 2500); // se mantiene cerca del borde superior
+  await expect(titulos).toHaveText([REMO, PECK, PRESS]);
+  expect(await page.evaluate(() => window.scrollY)).toBeLessThan(antes);
+  await saved(page);
+  await page.setViewportSize({ width: 375, height: 667 });
+
+  // Finalizar y «Guardar como rutina» toma el orden actualizado.
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial/);
+  await page.goto(`/sesiones/${sesion}`);
+  await page.getByRole("button", { name: "Acciones de la sesión" }).click();
+  await page.getByRole("menuitem", { name: "Guardar como rutina" }).click();
+  await expect(page.getByRole("list", { name: "Ejercicios de la rutina" }).locator(".routine-ex-title strong")).toHaveText([REMO, PECK, PRESS]);
+  await context.close();
+
+  // Escritorio: arrastrar con el mouse.
+  const desk = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const dp = await desk.newPage();
+  await login(dp, userK.email, userK.final);
+  await dp.goto(`/sesiones/${sesion}`);
+  await expect(dp.locator(".exercise-card h3")).toHaveText([REMO, PECK, PRESS]);
+  const h = (await dp.getByRole("button", { name: `Reordenar ${PRESS}` }).boundingBox())!;
+  const top = (await dp.getByRole("region", { name: REMO }).boundingBox())!;
+  await dp.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+  await dp.mouse.down();
+  await dp.mouse.move(h.x + h.width / 2, top.y + 10, { steps: 15 });
+  await dp.mouse.up();
+  await expect(dp.locator(".exercise-card h3")).toHaveText([PRESS, REMO, PECK]);
+  await expect(dp.locator(".save-status")).toHaveText("Guardado", { timeout: 15_000 });
+  await dp.reload();
+  await expect(dp.locator(".exercise-card h3")).toHaveText([PRESS, REMO, PECK]);
+  // Expandir o contraer desde el nombre sigue funcionando.
+  await dp.getByRole("button", { name: `Expandir ${PECK}` }).click();
+  await expect(dp.getByRole("button", { name: `Colapsar ${PECK}` })).toBeVisible();
+  await desk.close();
+});
+
 test("cuenta B no accede a los datos de A, ni por URL directa", async ({ browser }) => {
   const page = await newPage(browser);
   await login(page, userB.email, userB.temp);
