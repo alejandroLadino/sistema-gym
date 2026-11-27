@@ -30,12 +30,13 @@ function stepLabel(b: DraftBlock): string {
   const raw = b.value.trim();
   const weight = parseWeight(b.weight);
   const w = weight.ok ? weight.value : null;
+  const bar = b.bar ? { bar_only: true } : {};
   if (b.type === "hold") {
     const secs = /^\d{1,4}$/.test(raw) ? Number(raw) : null;
-    return secs ? formatStep({ type: "hold", seconds: secs, weight_kg: w }) : "Sostener · faltan los segundos";
+    return secs ? formatStep({ type: "hold", seconds: secs, weight_kg: w, ...bar }) : "Sostener · faltan los segundos";
   }
   const reps = parseReps(raw);
-  return reps.ok ? formatStep({ type: "reps", reps: reps.value, weight_kg: w }) : "Repeticiones · faltan las reps";
+  return reps.ok ? formatStep({ type: "reps", reps: reps.value, weight_kg: w, ...bar }) : "Repeticiones · faltan las reps";
 }
 
 /**
@@ -86,7 +87,7 @@ export function BlockSetSheet({ exerciseName, initial, initialCount, title, noti
   function add(type: "reps" | "hold") {
     // Un paso nuevo parte del último del mismo tipo (valor y peso), editable.
     const last = [...items].reverse().find((b) => b.type === type);
-    const step: DraftBlock = { key: newKey(), type, value: last?.value ?? "", weight: last?.weight ?? "" };
+    const step: DraftBlock = { key: newKey(), type, value: last?.value ?? "", weight: last?.weight ?? "", ...(last?.bar ? { bar: true } : {}) };
     setItems((xs) => [...xs, step]);
     focusKey.current = step.key;
     setOpenKey(step.key);
@@ -177,12 +178,21 @@ export function BlockSetSheet({ exerciseName, initial, initialCount, title, noti
                             inputMode="decimal"
                             autoComplete="off"
                             enterKeyHint="done"
-                            placeholder="opcional"
+                            placeholder={b.bar ? "barra" : "opcional"}
                             aria-label={`Peso del paso ${num} (kg, opcional)`}
                             aria-invalid={err ? true : undefined}
                             value={b.weight}
                             onChange={(e) => update(b.key, { weight: e.target.value })}
                           />
+                          <button
+                            type="button"
+                            className="bar-toggle"
+                            aria-pressed={Boolean(b.bar)}
+                            aria-label={`Solo barra en el paso ${num}`}
+                            onClick={() => update(b.key, { bar: !b.bar })}
+                          >
+                            Solo barra
+                          </button>
                         </label>
                         <button
                           type="button"

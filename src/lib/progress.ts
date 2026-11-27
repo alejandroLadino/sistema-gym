@@ -3,7 +3,7 @@ import { formatKg, isIsoDate } from "./format";
 import type { SetValue } from "./types";
 
 /** Mejor serie comparable: reps y peso del mismo bloque (o de la serie simple). */
-export type BestSet = { reps: number; weight_kg: number | null };
+export type BestSet = { reps: number; weight_kg: number | null; bar_only?: boolean };
 
 /** Fila de `get_exercise_progress`: una por sesión con sus series del ejercicio. */
 export type ProgressRow = {
@@ -27,6 +27,8 @@ export type SessionStat = {
   holdSeconds: number;
   /** Cada serie por bloques cuenta como una serie. */
   setCount: number;
+  /** Alguna serie o bloque con «Solo barra» (el ejercicio es con peso aunque falte la carga). */
+  hasBar: boolean;
   /** Posición entre las sesiones del mismo día (1, 2…) y cuántas hubo. */
   dayIndex: number;
   dayCount: number;
@@ -48,7 +50,7 @@ export function bestSet(sets: SetValue[]): BestSet {
     if (ws !== null && (wb === null || ws > wb || (ws === wb && s.reps > best.reps))) best = s;
     else if (ws === null && wb === null && s.reps > best.reps) best = s;
   }
-  return { reps: best.reps, weight_kg: weightOf(best) };
+  return { reps: best.reps, weight_kg: weightOf(best), ...(best.bar_only ? { bar_only: true } : {}) };
 }
 
 /** Estadísticas por sesión, de la más antigua a la más reciente (mismo día → por hora de creación). */
@@ -71,12 +73,15 @@ export function sessionStats(rows: ProgressRow[]): SessionStat[] {
       date: r.session_date,
       createdAt: r.created_at,
       sets: r.sets.map((s) =>
-        s.blocks?.length ? { reps: null, weight_kg: null, rounds: s.rounds ?? 1, blocks: s.blocks } : { reps: s.reps, weight_kg: weightOf(s) },
+        s.blocks?.length
+          ? { reps: null, weight_kg: null, rounds: s.rounds ?? 1, blocks: s.blocks }
+          : { reps: s.reps, weight_kg: weightOf(s), ...(s.bar_only ? { bar_only: true } : {}) },
       ),
       best: bestSet(r.sets),
       maxWeight: weights.length ? Math.max(...weights) : null,
       totalReps: r.sets.reduce((sum, s) => sum + setTotalReps(s), 0),
       holdSeconds: r.sets.reduce((sum, s) => sum + setHoldSeconds(s), 0),
+      hasBar: r.sets.some((s) => Boolean(s.bar_only) || Boolean(s.blocks?.some((b) => b.bar_only))),
       setCount: r.sets.length,
       dayIndex,
       dayCount: perDay.get(r.session_date) ?? 1,
@@ -86,7 +91,8 @@ export function sessionStats(rows: ProgressRow[]): SessionStat[] {
 
 /** Clasificación peso / peso corporal según TODO el historial (no depende del rango). */
 export function usesWeight(stats: SessionStat[]): boolean {
-  return stats.some((s) => s.maxWeight !== null);
+  // «Solo barra» sin peso capturado también es un ejercicio con peso (no peso corporal).
+  return stats.some((s) => s.maxWeight !== null || s.hasBar);
 }
 
 /** Sesiones comparables: con peso registrado si el ejercicio es con peso; todas si es de peso corporal. */
@@ -97,6 +103,7 @@ export function comparableSessions(stats: SessionStat[], weighted: boolean): Ses
 export function formatBestSet(set: BestSet, weighted: boolean): string {
   const w = weightOf(set);
   if (weighted && w !== null) return `${formatKg(w)} kg × ${set.reps}`;
+  if (set.bar_only) return `Solo barra × ${set.reps}`;
   return `${set.reps} reps`;
 }
 

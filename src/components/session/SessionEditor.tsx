@@ -801,17 +801,31 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
                         <div key={set.key}>
                           <div className="set-row">
                             <span className="num">{i + 1}</span>
-                            <input
-                              className="input"
-                              inputMode="decimal"
-                              autoComplete="off"
-                              placeholder="—"
-                              aria-label={`Peso serie ${i + 1} de ${ex.name} (kg, vacío si es peso corporal)`}
-                              aria-invalid={setErrors[set.key] ? true : undefined}
-                              value={set.weight}
-                              onChange={(e) => updateSet(ex.key, set.key, { weight: e.target.value })}
-                              enterKeyHint="next"
-                            />
+                            <div className="weight-cell">
+                              <input
+                                className="input"
+                                inputMode="decimal"
+                                autoComplete="off"
+                                placeholder={set.bar ? "barra" : "—"}
+                                aria-label={`Peso serie ${i + 1} de ${ex.name} (kg, vacío si es peso corporal)`}
+                                aria-invalid={setErrors[set.key] ? true : undefined}
+                                value={set.weight}
+                                onChange={(e) => updateSet(ex.key, set.key, { weight: e.target.value })}
+                                enterKeyHint="next"
+                              />
+                              {/* «Solo barra»: a la vista con el peso vacío o si ya está marcada. */}
+                              {set.bar || !set.weight.trim() ? (
+                                <button
+                                  type="button"
+                                  className="bar-toggle"
+                                  aria-pressed={Boolean(set.bar)}
+                                  aria-label={`Solo barra serie ${i + 1} de ${ex.name}`}
+                                  onClick={() => updateSet(ex.key, set.key, { bar: !set.bar })}
+                                >
+                                  Solo barra
+                                </button>
+                              ) : null}
+                            </div>
                             <input
                               className="input"
                               inputMode="numeric"
@@ -845,7 +859,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
                       key={`${ex.key}-${ex.sets.length}`}
                       exerciseKey={ex.key}
                       exerciseName={ex.name}
-                      defaults={lastSet ? { reps: lastSet.reps, weight: lastSet.weight } : undefined}
+                      defaults={lastSet ? { reps: lastSet.reps, weight: lastSet.weight, bar: lastSet.bar } : undefined}
                       onAdd={(sets) => addQuickSets(ex, sets)}
                       onCancel={empty ? undefined : () => setQuickOpen((q) => ({ ...q, [ex.key]: false }))}
                     />

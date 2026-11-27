@@ -744,3 +744,20 @@ html:has(.session-head) { scroll-padding-top: 124px; }
   background: color-mix(in srgb, var(--primary-soft) 70%, transparent);
 }
 html.is-dragging-card, html.is-dragging-card * { -webkit-user-select: none; user-select: none; cursor: grabbing; }
+
+/* --- «Solo barra» -------------------------------------------------------------- */
+.weight-cell { display: grid; gap: 4px; min-width: 0; }
+.set-row:has(.weight-cell .bar-toggle) { align-items: start; }
+.set-row:has(.weight-cell .bar-toggle) .num { padding-top: 13px; }
+.bar-toggle {
+  min-height: 32px; padding: 0 8px; border-radius: 999px; border: 1px dashed var(--border);
+  background: transparent; color: var(--muted); font: inherit; font-size: 0.78rem; font-weight: 700;
+  white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.bar-toggle[aria-pressed="true"] { border-style: solid; border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
+.bar-toggle[aria-pressed="true"]::before { content: "✓ "; }
+.bar-toggle:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 1px; }
+.quick-add .bar-toggle, .step-edit .bar-toggle { justify-self: start; }
+.step-edit { align-items: start; }
+.step-edit > .btn-icon { margin-top: 26px; }
