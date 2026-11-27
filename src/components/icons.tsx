@@ -48,3 +48,9 @@ export const IconCheck = () => (
 export const IconList = () => (
   <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6h.01M4 12h.01M4 18h.01" /></svg>
 );
+export const IconFlame = () => (
+  <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2.3 1.2-3.8 2.5-5 .3 1.8 1.2 2.8 2.5 3.2C11 8.5 11 5.5 12 3Z" /></svg>
+);
+export const IconClock = () => (
+  <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+);

@@ -554,6 +554,69 @@ begin
 end $$;
 \echo '   Mis rutinas (validación, uso, metas, archivados, aislamiento): OK'
 
+-- «Tu constancia» ------------------------------------------------------------------------
+-- Ana: 002 (26/11, finalizada, con series) cuenta; 001 (18/11, en curso) no.
+select from pg_temp.as_user('aaaaaaaa-0000-0000-0000-000000000001');
+set role authenticated;
+do $$
+declare r record;
+begin
+  select * into r from public.get_training_consistency('2026-11-01');
+  assert r.total_days = 1 and r.recent_days = array['2026-11-26']::date[] and r.active_weeks = array['2026-11-23']::date[],
+    format('Estado inicial: %s', row_to_json(r));
+
+  -- Segunda sesión válida el mismo día: sigue siendo un día.
+  perform public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000010", "session_date": "2026-11-26",
+    "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a", "sets": [{"reps": 5, "weight_kg": 50}]}]}'::jsonb);
+  perform public.finish_workout_session('50000000-0000-0000-0000-000000000010');
+  -- Finalizada sin series (24/11): no cuenta.
+  perform public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000011", "session_date": "2026-11-24",
+    "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a", "sets": []}]}'::jsonb);
+  perform public.finish_workout_session('50000000-0000-0000-0000-000000000011');
+  -- En curso con series (16/11): no cuenta hasta finalizarla.
+  perform public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000012", "session_date": "2026-11-16",
+    "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a", "sets": [{"reps": 8, "weight_kg": 40}]}]}'::jsonb);
+  select * into r from public.get_training_consistency('2026-11-01');
+  assert r.total_days = 1 and r.recent_days = array['2026-11-26']::date[], format('Mismo día, sin series y en curso: %s', row_to_json(r));
+
+  perform public.finish_workout_session('50000000-0000-0000-0000-000000000012');
+  select * into r from public.get_training_consistency('2026-11-01');
+  assert r.total_days = 2 and r.recent_days = array['2026-11-26', '2026-11-16']::date[]
+         and r.active_weeks = array['2026-11-23', '2026-11-16']::date[], format('Al finalizar cuenta: %s', row_to_json(r));
+  -- Solo los días desde p_since; el total y las semanas son de todo el historial.
+  select * into r from public.get_training_consistency('2026-11-20');
+  assert r.total_days = 2 and r.recent_days = array['2026-11-26']::date[] and cardinality(r.active_weeks) = 2, 'Ventana reciente';
+
+  -- Corregir la fecha (domingo 01/11 → semana del lunes 26/10).
+  perform public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000012", "session_date": "2026-11-01",
+    "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a", "sets": [{"reps": 8, "weight_kg": 40}]}]}'::jsonb);
+  select * into r from public.get_training_consistency('2026-11-01');
+  assert r.active_weeks = array['2026-11-23', '2026-10-26']::date[] and r.recent_days = array['2026-11-26', '2026-11-01']::date[],
+    format('Corregir la fecha: %s', row_to_json(r));
+  -- Quitar sus series: deja de contar.
+  perform public.save_workout_session('{"id": "50000000-0000-0000-0000-000000000012", "session_date": "2026-11-01",
+    "exercises": [{"exercise_id": "e0000000-0000-0000-0000-00000000000a", "sets": []}]}'::jsonb);
+  select * into r from public.get_training_consistency('2026-11-01');
+  assert r.total_days = 1 and r.active_weeks = array['2026-11-23']::date[], format('Quitar series: %s', row_to_json(r));
+  -- Eliminar una de las dos del 26/11: el día sigue contando por la otra.
+  delete from public.workout_sessions where id = '50000000-0000-0000-0000-000000000010';
+  select * into r from public.get_training_consistency('2026-11-01');
+  assert r.total_days = 1 and r.recent_days = array['2026-11-26']::date[], 'Eliminar una de dos sesiones del día';
+end $$;
+delete from public.workout_sessions where id in ('50000000-0000-0000-0000-000000000011', '50000000-0000-0000-0000-000000000012');
+reset role;
+
+select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
+set role authenticated;
+do $$
+declare r record;
+begin
+  select * into r from public.get_training_consistency('2000-01-01');
+  assert r.total_days = 0 and r.recent_days = '{}'::date[] and r.active_weeks = '{}'::date[], 'La constancia es privada';
+end $$;
+reset role;
+\echo '   Tu constancia (días distintos, válidas, fecha, series, eliminación, aislamiento): OK'
+
 select from pg_temp.as_user('bbbbbbbb-0000-0000-0000-000000000002');
 set role authenticated;
 do $$
