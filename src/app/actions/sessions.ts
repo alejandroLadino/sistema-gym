@@ -1,10 +1,11 @@
 "use server";
 
 import { getActionUser } from "@/lib/auth";
-import { isValidBlockSet } from "@/lib/blocks";
+import { isValidBlockSet, isValidPlan } from "@/lib/blocks";
+import { MAX_TARGET_REPS, MAX_TARGET_SETS } from "@/lib/routines";
 import { createClient } from "@/lib/supabase/server";
 import { isIsoDate } from "@/lib/format";
-import type { SessionPayload } from "@/lib/session-draft";
+import type { SessionPayload, TargetPayload } from "@/lib/session-draft";
 import type { ActionResult, PreviousSets } from "@/lib/types";
 import { isUuid, MAX_REPS, MAX_WEIGHT_KG, normalizeSearch } from "@/lib/validation";
 import { MAX_QUERY_LENGTH, type HistoryCursor, type HistorySession } from "@/lib/history";
@@ -15,14 +16,45 @@ const FINISH_NEEDS_EXERCISE = "Agrega al menos un ejercicio para finalizar la se
 
 const NO_ACCESS = "Tu sesión expiró o tu cuenta no tiene acceso. Vuelve a iniciar sesión; lo capturado se conserva en este dispositivo.";
 
+const optInt = (v: unknown, max: number) => v === null || v === undefined || (Number.isInteger(v) && (v as number) >= 1 && (v as number) <= max);
+
+/** Meta de la sesión (opcional): mismas reglas que la de una rutina. */
+function isValidTarget(t: TargetPayload | null | undefined): boolean {
+  if (t === null || t === undefined) return true;
+  if (typeof t !== "object") return false;
+  const min = t.min ?? null;
+  const max = t.max ?? null;
+  return (
+    optInt(t.sets, MAX_TARGET_SETS) &&
+    optInt(min, MAX_TARGET_REPS) &&
+    optInt(max, MAX_TARGET_REPS) &&
+    (min === null) === (max === null) &&
+    (min === null || min <= (max as number)) &&
+    (t.blocks === null || t.blocks === undefined || isValidPlan(t.blocks))
+  );
+}
+
+/** Pareja alternada (opcional): número de pareja y turno 0 o 1, los dos o ninguno. */
+function isValidAlt(group: unknown, slot: unknown): boolean {
+  if ((group === null || group === undefined) && (slot === null || slot === undefined)) return true;
+  return Number.isInteger(group) && (group as number) >= 1 && (group as number) <= 50 && (slot === 0 || slot === 1);
+}
+
 function isValidPayload(p: SessionPayload): boolean {
   if (!p || !isUuid(p.id) || !isIsoDate(p.session_date)) return false;
+  if (p.guided !== undefined) {
+    if (!p.guided || typeof p.guided !== "object" || typeof p.guided.started !== "boolean") return false;
+    if (p.guided.exercise_id !== null && !isUuid(p.guided.exercise_id)) return false;
+  }
   if (p.notes !== null && (typeof p.notes !== "string" || p.notes.length > 2000)) return false;
   // Sin ejercicios es válido para una sesión en curso; la base rechaza vaciar una finalizada.
   if (!Array.isArray(p.exercises) || p.exercises.length > 50) return false;
   return p.exercises.every(
     (e) =>
       isUuid(e.exercise_id) &&
+      isValidTarget(e.target) &&
+      (e.completed === undefined || typeof e.completed === "boolean") &&
+      isValidAlt(e.alt_group, e.alt_slot) &&
       Array.isArray(e.sets) &&
       e.sets.length <= 100 &&
       e.sets.every((s) =>

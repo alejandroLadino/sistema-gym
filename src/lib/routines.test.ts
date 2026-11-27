@@ -53,8 +53,8 @@ describe("formulario de rutina", () => {
         id: "r",
         name: "Pecho y tríceps",
         exercises: [
-          { exercise_id: "e2", target_sets: 3, target_reps_min: 8, target_reps_max: 12, target_blocks: null },
-          { exercise_id: "e1", target_sets: null, target_reps_min: null, target_reps_max: null, target_blocks: null },
+          { exercise_id: "e2", target_sets: 3, target_reps_min: 8, target_reps_max: 12, target_blocks: null, alt_group: null, alt_slot: null },
+          { exercise_id: "e1", target_sets: null, target_reps_min: null, target_reps_max: null, target_blocks: null, alt_group: null, alt_slot: null },
         ],
       },
     });
@@ -79,6 +79,8 @@ describe("formulario de rutina", () => {
             target_reps_min: null,
             target_reps_max: null,
             target_blocks: { rounds: 3, items: [{ type: "reps", reps: 7 }, { type: "hold", seconds: 7 }] },
+            alt_group: null,
+            alt_slot: null,
           },
         ],
       },

@@ -1,5 +1,5 @@
 import { isIsoDate } from "./format";
-import { isBlockSet, MAX_BLOCKS, MAX_HOLD_SECONDS, MAX_ROUNDS, setHoldSeconds, type Block, type BlockPlanItem } from "./blocks";
+import { isBlockSet, MAX_BLOCKS, MAX_HOLD_SECONDS, MAX_ROUNDS, setHoldSeconds, type Block, type BlockPlan, type BlockPlanItem } from "./blocks";
 import { bestSet, formatBestSet } from "./progress";
 import type { SessionData, SetValue } from "./types";
 import type { Target } from "./routines";
@@ -43,15 +43,27 @@ export type DraftExercise = {
   exerciseId: string;
   name: string;
   archived?: boolean;
-  /** Meta de la rutina con que se inició la sesión (solo se muestra; no se envía). */
+  /** Grupo muscular del catálogo (para preseleccionarlo al cambiar el ejercicio). */
+  muscleGroupId?: string | null;
+  /** Meta de esta sesión: la copiada de la rutina o la ajustada al cambiar o alternar. */
   target?: Target | null;
+  /** Marcado como finalizado («✓ Completado»), aunque tenga menos series que la meta. */
+  done?: boolean;
+  /** Series alternadas: pareja y turno (0 o 1) dentro de ella. */
+  alt?: AltRef | null;
   sets: DraftSet[];
 };
+
+export type AltRef = { group: number; slot: 0 | 1 };
+
+/** Modo guiado: si se inició y en qué ejercicio quedó (por id del catálogo). */
+export type GuidedState = { started: boolean; exerciseId: string | null };
 export type Draft = {
   id: string;
   date: string;
   notes: string;
   exercises: DraftExercise[];
+  guided?: GuidedState;
   /** Marca de tiempo local de la última edición. */
   editedAt: number;
 };
@@ -60,8 +72,34 @@ export type SessionPayload = {
   id: string;
   session_date: string;
   notes: string | null;
-  exercises: { exercise_id: string; sets: SetValue[] }[];
+  guided: { started: boolean; exercise_id: string | null };
+  exercises: {
+    exercise_id: string;
+    sets: SetValue[];
+    target: TargetPayload | null;
+    completed: boolean;
+    alt_group: number | null;
+    alt_slot: number | null;
+  }[];
 };
+
+export type TargetPayload = { sets: number | null; min: number | null; max: number | null; blocks: BlockPlan | null };
+
+function targetToPayload(t: Target | null | undefined): TargetPayload | null {
+  if (!t || (t.sets == null && t.repsMin == null && !t.blocks)) return null;
+  return { sets: t.sets ?? null, min: t.repsMin ?? null, max: t.repsMin != null ? (t.repsMax ?? t.repsMin) : null, blocks: t.blocks ?? null };
+}
+
+/**
+ * Una pareja alternada necesita ejercicios en sus dos turnos; si uno se quitó (o se
+ * omitió por archivado), los demás dejan de alternarse.
+ */
+export function normalizeAlt(exercises: DraftExercise[]): DraftExercise[] {
+  const slots = new Map<number, Set<number>>();
+  for (const e of exercises) if (e.alt) slots.set(e.alt.group, (slots.get(e.alt.group) ?? new Set()).add(e.alt.slot));
+  if (![...slots.values()].some((s) => s.size < 2)) return exercises;
+  return exercises.map((e) => (e.alt && (slots.get(e.alt.group)?.size ?? 0) < 2 ? { ...e, alt: null } : e));
+}
 
 export type DraftErrors = {
   general?: string;
@@ -152,11 +190,15 @@ export function sessionToDraft(session: SessionData): Draft {
     date: session.session_date,
     notes: session.notes ?? "",
     editedAt: Date.parse(session.updated_at) || 0,
-    exercises: session.exercises.map((e) => ({
+    guided: { started: Boolean(session.guided_started_at), exerciseId: session.guided_exercise_id ?? null },
+    exercises: normalizeAlt(session.exercises.map((e) => ({
       key: newKey(),
       exerciseId: e.exercise_id,
       name: e.name,
       archived: e.archived,
+      muscleGroupId: e.muscle_group_id ?? null,
+      done: Boolean(e.completed),
+      alt: e.alt_group != null && (e.alt_slot === 0 || e.alt_slot === 1) ? { group: e.alt_group, slot: e.alt_slot } : null,
       target:
         e.target_sets != null || e.target_reps_min != null || e.target_blocks != null
           ? {
@@ -167,7 +209,7 @@ export function sessionToDraft(session: SessionData): Draft {
             }
           : null,
       sets: setsToDraft(e.sets),
-    })),
+    }))),
   };
 }
 
@@ -207,7 +249,14 @@ export function draftToPayload(
       else if (!weight.ok) errors.sets[set.key] = weight.error;
       else sets.push({ reps: reps.value, ...loadFields(load, weight.value) });
     }
-    return { exercise_id: ex.exerciseId, sets };
+    return {
+      exercise_id: ex.exerciseId,
+      sets,
+      target: targetToPayload(ex.target),
+      completed: Boolean(ex.done),
+      alt_group: ex.alt?.group ?? null,
+      alt_slot: ex.alt?.slot ?? null,
+    };
   });
 
   if (errors.general || Object.keys(errors.sets).length > 0) return { ok: false, errors };
@@ -218,6 +267,7 @@ export function draftToPayload(
       id: draft.id,
       session_date: draft.date,
       notes: draft.notes.trim() || null,
+      guided: { started: Boolean(draft.guided?.started), exercise_id: draft.guided?.exerciseId ?? null },
       exercises,
     },
   };
@@ -405,4 +455,17 @@ export function hasUnsavedNewDraft(ownerId: string): boolean {
   if (!id) return false;
   const stored = readStoredDraft(id, ownerId);
   return Boolean(stored && !stored.savedOnce && stored.draft.exercises.length > 0);
+}
+
+/** Serie del borrador ya validada (null si le faltan datos). */
+export function parseDraftSet(set: DraftSet): SetValue | null {
+  if (set.blocks) {
+    const parsed = parseBlocks(set.blocks);
+    return parsed.ok ? parsed.set : null;
+  }
+  if (isSetBlank(set)) return null;
+  const load = loadOf(set);
+  const reps = parseReps(set.reps);
+  const weight = load === "body" ? ({ ok: true, value: null } as const) : parseWeight(set.weight);
+  return reps.ok && weight.ok ? { reps: reps.value, ...loadFields(load, weight.value) } : null;
 }

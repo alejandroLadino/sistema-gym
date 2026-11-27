@@ -32,6 +32,12 @@ type Props = {
   notice?: string;
   /** Dónde se agrega lo creado: cambia el texto del botón de crear. */
   destination?: "sesión" | "rutina";
+  /** Grupo muscular preseleccionado en el filtro (p. ej., el del ejercicio que se cambia). */
+  initialGroup?: string | null;
+  /** Ocultar (en vez de deshabilitar) los ejercicios que ya están en la sesión. */
+  hideInSession?: boolean;
+  /** Contenido bajo el título (p. ej., el ejercicio actual al cambiarlo). */
+  header?: React.ReactNode;
 };
 
 export function ExercisePicker({
@@ -44,10 +50,15 @@ export function ExercisePicker({
   title,
   notice,
   destination = "sesión",
+  initialGroup,
+  hideInSession = false,
+  header,
 }: Props) {
   const [view, setView] = useState<"list" | "create">("list");
   // Filtro y búsqueda se conservan al volver del formulario de creación.
-  const [group, setGroup] = useState<string>(ALL);
+  const [group, setGroup] = useState<string>(() =>
+    initialGroup && muscleGroups.some((g) => g.id === initialGroup) ? initialGroup : ALL,
+  );
   const [query, setQuery] = useState("");
   const titleRef = useRef<HTMLHeadingElement>(null);
   const picking = useRef(false); // evita agregar dos veces por doble toque
@@ -64,7 +75,10 @@ export function ExercisePicker({
     };
   }, [onClose]);
 
-  const active = useMemo(() => exercises.filter((e) => !e.archived_at), [exercises]);
+  const active = useMemo(
+    () => exercises.filter((e) => !e.archived_at && !(hideInSession && inSession.has(e.id))),
+    [exercises, hideInSession, inSession],
+  );
   const hasUnclassified = active.some((e) => !e.muscle_group_id);
   const inGroup = useMemo(
     () =>
@@ -109,6 +123,7 @@ export function ExercisePicker({
           </h2>
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Cerrar</button>
         </div>
+        {header ?? null}
         {notice ? <p className="alert alert-warning" style={{ margin: 0, flex: "none" }}>{notice}</p> : null}
 
         {view === "list" ? (
@@ -189,7 +204,7 @@ export function ExercisePicker({
           <CreateExerciseForm
             key="crear"
             muscleGroups={muscleGroups}
-            catalog={active}
+            catalog={exercises.filter((e) => !e.archived_at)}
             initialName={query.trim()}
             initialGroup={group === ALL || group === UNCLASSIFIED ? "" : group}
             onCreated={onCreated}

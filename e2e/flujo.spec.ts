@@ -1510,7 +1510,10 @@ test("Mis rutinas: crear, reordenar, metas, usar, editar, eliminar, guardar sesi
   await expect(page).toHaveURL(new RegExp(`/rutinas/nueva\\?desde=${sesion1}$`));
   await expect(page.getByText("Ejercicios de la sesión del")).toBeVisible();
   await expect(filas.locator("strong")).toHaveText(["Fondos F", "Press F", "Aperturas F"]);
-  await expect(page.getByLabel("Series objetivo de Fondos F")).toHaveValue("");
+  // Conserva las metas que tenía la sesión (copiadas de la rutina).
+  await expect(page.getByLabel("Series objetivo de Fondos F")).toHaveValue("3");
+  await expect(page.getByLabel("Repeticiones mínimas de Fondos F")).toHaveValue("8");
+  await expect(page.getByLabel("Repeticiones máximas de Fondos F")).toHaveValue("12");
   await expect(page.getByLabel("Nombre")).toHaveValue("");
   await page.getByRole("button", { name: "Guardar rutina" }).click();
   await expect(page.locator(".field-error")).toHaveText("Escribe un nombre para la rutina");
@@ -1520,7 +1523,7 @@ test("Mis rutinas: crear, reordenar, metas, usar, editar, eliminar, guardar sesi
   await expect(page.getByText("Rutina «Desde sesión» guardada.")).toBeVisible();
   await expect(page.getByRole("listitem", { name: "Desde sesión" }).locator(".routine-card-exercises > li")).toHaveText([
     "Press F",
-    "Fondos F",
+    "Fondos F · 3 × 8–12",
     "Aperturas F",
   ]);
 

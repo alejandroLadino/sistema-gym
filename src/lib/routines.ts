@@ -14,6 +14,9 @@ export type RoutineExerciseRow = {
   target_reps_max: number | null;
   /** Secuencia planificada (series por bloques), sin pesos. */
   target_blocks?: BlockPlan | null;
+  /** Series alternadas: pareja y turno (0 o 1). */
+  alt_group?: number | null;
+  alt_slot?: number | null;
 };
 
 export type Routine = {
@@ -34,6 +37,8 @@ export type RoutinePayload = {
     target_reps_min: number | null;
     target_reps_max: number | null;
     target_blocks: BlockPlan | null;
+    alt_group: number | null;
+    alt_slot: number | null;
   }[];
 };
 
@@ -56,7 +61,16 @@ export type RoutineDraftExercise = {
   repsMax: string;
   /** Meta por bloques: si existe, reemplaza a las repeticiones. */
   plan?: RoutineDraftPlan | null;
+  /** Series alternadas con otro ejercicio de la rutina. */
+  alt?: { group: number; slot: 0 | 1 } | null;
 };
+
+/** Parejas con un solo turno (se quitó o reemplazó el otro ejercicio) dejan de alternarse. */
+export function completeAltGroups<T extends { alt?: { group: number; slot: 0 | 1 } | null }>(rows: T[]): T[] {
+  const slots = new Map<number, Set<number>>();
+  for (const r of rows) if (r.alt) slots.set(r.alt.group, (slots.get(r.alt.group) ?? new Set()).add(r.alt.slot));
+  return rows.map((r) => (r.alt && (slots.get(r.alt.group)?.size ?? 0) < 2 ? { ...r, alt: null } : r));
+}
 
 export type TargetErrors = Partial<Record<"sets" | "reps" | "plan", string>>;
 
@@ -154,7 +168,7 @@ export function routineToPayload(
   else if (new Set(exercises.map((e) => e.exerciseId)).size !== exercises.length) general = "Hay ejercicios repetidos";
 
   const rows: RoutinePayload["exercises"] = [];
-  for (const ex of exercises) {
+  for (const ex of completeAltGroups(exercises)) {
     // Con secuencia por bloques, las repeticiones sueltas no aplican.
     const parsed = parseTarget(ex.plan ? { ...ex, repsMin: "", repsMax: "" } : ex);
     const plan = ex.plan ? parsePlan(ex.plan) : null;
@@ -167,6 +181,8 @@ export function routineToPayload(
         target_reps_min: parsed.target.repsMin,
         target_reps_max: parsed.target.repsMax,
         target_blocks: plan && plan.ok ? plan.plan : null,
+        alt_group: ex.alt?.group ?? null,
+        alt_slot: ex.alt?.slot ?? null,
       });
   }
   if (nameError || general || Object.keys(targets).length) return { ok: false, name: nameError, general, targets };

@@ -60,3 +60,9 @@ export const IconPencil = () => (
 export const IconGrip = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg>
 );
+export const IconSwap = () => (
+  <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><path d="M4 8h14" /><path d="m15 4 4 4-4 4" /><path d="M20 16H6" /><path d="m9 12-4 4 4 4" /></svg>
+);
+export const IconPlay = () => (
+  <svg viewBox="0 0 24 24" {...base} aria-hidden="true"><path d="M7 4.5v15l12-7.5-12-7.5Z" /></svg>
+);

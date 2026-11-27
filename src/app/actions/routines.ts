@@ -33,7 +33,9 @@ function isValidRoutine(p: RoutinePayload): boolean {
       optInt(e.target_reps_max, MAX_TARGET_REPS) &&
       (e.target_reps_min === null) === (e.target_reps_max === null) &&
       (e.target_reps_min === null || e.target_reps_min <= (e.target_reps_max as number)) &&
-      (e.target_blocks === null || e.target_blocks === undefined || isValidPlan(e.target_blocks)),
+      (e.target_blocks === null || e.target_blocks === undefined || isValidPlan(e.target_blocks)) &&
+      (((e.alt_group === null || e.alt_group === undefined) && (e.alt_slot === null || e.alt_slot === undefined)) ||
+        (Number.isInteger(e.alt_group) && (e.alt_group as number) >= 1 && (e.alt_group as number) <= 50 && (e.alt_slot === 0 || e.alt_slot === 1))),
   );
 }
 
@@ -47,7 +49,12 @@ export async function saveRoutine(payload: RoutinePayload): Promise<ActionResult
     p_routine: {
       ...payload,
       name: payload.name.trim(),
-      exercises: payload.exercises.map((e) => ({ ...e, target_blocks: e.target_blocks ?? null })),
+      exercises: payload.exercises.map((e) => ({
+        ...e,
+        target_blocks: e.target_blocks ?? null,
+        alt_group: e.alt_group ?? null,
+        alt_slot: e.alt_slot ?? null,
+      })),
     },
   });
   if (error || !data) {
