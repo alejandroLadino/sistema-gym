@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useSyncExternalStore } from "react";
 import { repeatSession } from "@/app/actions/sessions";
-import { IconCalendar, IconCheck, IconPlus } from "@/components/icons";
+import { IconCalendar, IconCheck, IconChevronRight, IconList, IconPlus } from "@/components/icons";
 import { formatDate, formatLongDate, todayLocal } from "@/lib/format";
 import {
   inProgressToday,
@@ -140,6 +140,14 @@ export function HomeDashboard({ userId, firstName, serverToday, sessions }: Prop
             </p>
           ) : null}
         </div>
+        <Link href="/rutinas" className="card routines-link">
+          <span className="routines-link-icon" aria-hidden="true"><IconList /></span>
+          <span className="routines-link-text">
+            <strong>Mis rutinas</strong>
+            <span className="muted small">Empieza con una plantilla de ejercicios</span>
+          </span>
+          <span className="catalog-row-chevron" aria-hidden="true"><IconChevronRight /></span>
+        </Link>
       </section>
 
       <section className="stack" style={{ gap: 10 }} aria-labelledby="semana-titulo">

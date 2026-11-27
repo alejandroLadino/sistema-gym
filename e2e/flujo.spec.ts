@@ -1336,6 +1336,273 @@ test("Sesiones: quitar el último ejercicio y «Última vez» tras repetir (375 
   await context.close();
 });
 
+test("Mis rutinas: crear, reordenar, metas, usar, editar, eliminar, guardar sesión, archivados y aislamiento (375 px)", async ({ browser }) => {
+  const userF = { email: `fede.${run}@example.com`, temp: "Temporal147", final: "FedeSegura258" };
+  const userG = { email: `gabi.${run}@example.com`, temp: "Temporal369", final: "GabiSegura147" };
+  const admin = await newPage(browser);
+  await login(admin, ADMIN_EMAIL, ADMIN_PASSWORD);
+  for (const u of [userF, userG]) {
+    await admin.goto("/admin");
+    const form = admin.getByRole("form", { name: "Crear cuenta" });
+    await form.getByLabel("Correo").fill(u.email);
+    await form.getByLabel("Contraseña inicial").fill(u.temp);
+    await form.getByRole("button", { name: "Crear cuenta" }).click();
+    await expect(form.getByText(`Cuenta creada para ${u.email}`)).toBeVisible();
+  }
+  await admin.context().close();
+
+  const context = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  const dialogs: string[] = [];
+  page.on("dialog", (d) => {
+    dialogs.push(d.message());
+    void d.accept();
+  });
+  await login(page, userF.email, userF.temp);
+  await page.getByLabel("Nueva contraseña", { exact: true }).fill(userF.final);
+  await page.getByLabel("Repite la nueva contraseña").fill(userF.final);
+  await page.getByRole("button", { name: "Guardar contraseña" }).click();
+  await expect(page).toHaveURL(/\/$/);
+
+  // Acceso desde Inicio, junto a «Entrenamiento de hoy».
+  await expect(page.getByRole("link", { name: /Mis rutinas/ })).toBeInViewport();
+  await page.getByRole("link", { name: /Mis rutinas/ }).click();
+  await expect(page.getByText("Todavía no tienes rutinas.")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Navegación principal" }).getByRole("link", { name: "Inicio" })).toHaveAttribute("aria-current", "page");
+
+  // Crear «Pecho y tríceps» creando los ejercicios desde el selector por grupo.
+  await page.getByRole("link", { name: "Nueva rutina" }).first().click();
+  await page.getByLabel("Nombre").fill("Pecho y tríceps");
+  const agregar = async (name: string, muscle?: string) => {
+    await page.getByRole("button", { name: "Agregar ejercicio", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByLabel("Buscar ejercicio").fill(name);
+    if (muscle) {
+      await dialog.locator(".picker-foot").getByRole("button", { name: "Crear ejercicio" }).click();
+      await dialog.getByLabel("Grupo muscular").selectOption({ label: muscle });
+      await dialog.getByRole("button", { name: "Crear y agregar a la rutina" }).click();
+    } else {
+      await dialog.getByRole("listitem").filter({ hasText: name }).first().getByRole("button").click();
+    }
+    await expect(dialog).toBeHidden();
+  };
+  await agregar("Press F", "Pecho");
+  await agregar("Fondos F", "Tríceps");
+  await agregar("Aperturas F", "Pecho");
+  const filas = page.getByRole("list", { name: "Ejercicios de la rutina" }).locator(":scope > li");
+  await expect(filas).toHaveCount(3);
+  // Sin duplicados: un ejercicio ya agregado aparece marcado y no se agrega otra vez.
+  await page.getByRole("button", { name: "Agregar ejercicio", exact: true }).click();
+  await page.getByRole("dialog").getByLabel("Buscar ejercicio").fill("Press F");
+  await expect(page.getByRole("dialog").getByText("En la rutina")).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Cerrar" }).click();
+  await expect(filas).toHaveCount(3);
+
+  // Reordenar con controles de 44 px o más: Fondos F sube al primer lugar.
+  const subir = page.getByRole("button", { name: "Subir Fondos F" });
+  const box = (await subir.boundingBox())!;
+  expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
+  await subir.click();
+  await expect(filas.nth(0)).toHaveAccessibleName("1. Fondos F");
+  await expect(page.getByRole("button", { name: "Subir Fondos F" })).toBeDisabled();
+
+  // Metas: validación (enteros positivos, mínimo ≤ máximo) y 3 × 8–12.
+  await page.getByLabel("Series objetivo de Fondos F").fill("0");
+  await page.getByLabel("Repeticiones mínimas de Fondos F").fill("12");
+  await page.getByLabel("Repeticiones máximas de Fondos F").fill("8");
+  await page.getByRole("button", { name: "Guardar rutina" }).click();
+  await expect(filas.nth(0).locator(".field-error")).toContainText("Series: un entero de 1 a 20");
+  await expect(filas.nth(0).locator(".field-error")).toContainText("El mínimo no puede superar el máximo");
+  await page.getByLabel("Series objetivo de Fondos F").fill("3");
+  await page.getByLabel("Repeticiones mínimas de Fondos F").fill("8");
+  await page.getByLabel("Repeticiones máximas de Fondos F").fill("12");
+  await shot(page, "17a-rutina-editor");
+  await page.getByRole("button", { name: "Guardar rutina" }).click();
+  await expect(page).toHaveURL(/\/rutinas$|\/rutinas\?/);
+  await expect(page.getByText("Rutina «Pecho y tríceps» guardada.")).toBeVisible();
+  const tarjeta = page.getByRole("listitem", { name: "Pecho y tríceps" });
+  await expect(tarjeta.locator(".routine-card-exercises > li")).toHaveText(["Fondos F · 3 × 8–12", "Press F", "Aperturas F"]);
+  const routineId = (await tarjeta.getByRole("link", { name: "Editar rutina Pecho y tríceps" }).getAttribute("href"))!.split("/").pop()!;
+  await shot(page, "17b-mis-rutinas");
+
+  // Usar la rutina (doble toque): una sola sesión en curso, en orden, con metas y cero series.
+  await tarjeta.getByRole("button", { name: "Usar rutina Pecho y tríceps" }).dblclick();
+  await expect(page).toHaveURL(/\/sesiones\/[0-9a-f-]{36}$/);
+  const sesion1 = page.url().split("/").pop()!;
+  await expect(page.getByText("Sesión nueva con la rutina «Pecho y tríceps»")).toBeVisible();
+  const comprobarSesion = async () => {
+    await expect(page.locator(".exercise-card h3")).toHaveText(["Fondos F", "Press F", "Aperturas F"]);
+    await expect(page.getByRole("region", { name: "Fondos F" }).locator(".ex-goal")).toHaveText("Meta: 3 × 8–12");
+    await expect(page.getByRole("region", { name: "Press F" }).locator(".ex-goal")).toHaveCount(0);
+    await expect(page.locator(".ex-summary")).toHaveText(["Sin series registradas", "Sin series registradas", "Sin series registradas"]);
+    await expect(page.locator(".save-status")).toHaveText("Guardado");
+    await expect(page.getByText("Finalizada", { exact: true })).toHaveCount(0);
+  };
+  await comprobarSesion();
+  await shot(page, "17c-sesion-con-rutina");
+  await page.reload();
+  await comprobarSesion();
+  await page.goto("/historial");
+  await expect(page.locator(".history-card")).toHaveCount(1);
+  await expect(page.locator(".history-card").first()).toContainText("3 ejercicios · 0 series");
+  await expect(page.locator(".history-card").first()).toContainText("En curso");
+  // Las metas no cuentan como trabajo: Progreso no tiene registros.
+  await page.goto("/progreso");
+  await expect(page.getByRole("list", { name: "Ejercicios con registros" })).toHaveCount(0);
+
+  // Con una sesión en curso hoy: «Continuar sesión» o «Iniciar otra con esta rutina».
+  await page.goto("/rutinas");
+  await tarjeta.getByRole("button", { name: "Usar rutina Pecho y tríceps" }).click();
+  const enCurso = page.getByRole("dialog", { name: "Ya tienes un entrenamiento en curso hoy" });
+  await expect(enCurso.getByRole("link", { name: "Continuar sesión" })).toHaveAttribute("href", `/sesiones/${sesion1}`);
+  await enCurso.getByRole("button", { name: "Iniciar otra con esta rutina" }).click();
+  await expect(page).toHaveURL(/\/sesiones\/[0-9a-f-]{36}$/);
+  const sesion2 = page.url().split("/").pop()!;
+  expect(sesion2).not.toBe(sesion1);
+  await page.goto("/historial");
+  await expect(page.locator(".history-card")).toHaveCount(2);
+
+  // Editar la rutina después de usarla no cambia las sesiones creadas con ella.
+  await page.goto(`/rutinas/${routineId}`);
+  await page.getByLabel("Nombre").fill("Pecho y tríceps B");
+  await page.getByLabel("Series objetivo de Fondos F").fill("4");
+  await page.getByLabel("Repeticiones mínimas de Fondos F").fill("6");
+  await page.getByLabel("Repeticiones máximas de Fondos F").fill("8");
+  await page.getByRole("button", { name: "Quitar Aperturas F de la rutina" }).click();
+  await page.getByRole("button", { name: "Guardar rutina" }).click();
+  await expect(page.getByText("Rutina «Pecho y tríceps B» guardada.")).toBeVisible();
+  await expect(page.getByRole("listitem", { name: "Pecho y tríceps B" }).locator(".routine-card-exercises > li")).toHaveText([
+    "Fondos F · 4 × 6–8",
+    "Press F",
+  ]);
+  await page.goto(`/sesiones/${sesion1}`);
+  await comprobarSesion();
+
+  // Registrar en la sesión 1 y finalizarla.
+  await expand(page, "Fondos F");
+  const fondos = page.getByRole("region", { name: "Fondos F" });
+  await fondos.getByLabel("Repeticiones por serie de Fondos F").fill("10");
+  await fondos.getByRole("button", { name: "Agregar 3 series" }).click();
+  await saved(page);
+  await page.getByRole("button", { name: "Finalizar sesión" }).click();
+  await expect(page).toHaveURL(/\/historial/);
+  await page.goto(`/sesiones/${sesion1}`);
+  await expect(page.getByRole("region", { name: "Fondos F" }).locator(".ex-goal")).toHaveText("Meta: 3 × 8–12");
+
+  // Eliminar la rutina: confirmación y las sesiones se conservan.
+  await page.goto(`/rutinas/${routineId}`);
+  await page.getByRole("button", { name: "Eliminar rutina" }).click();
+  expect(dialogs.at(-1)).toContain("Las sesiones que ya registraste con ella se conservarán");
+  await expect(page.getByText("Rutina eliminada. Tus sesiones registradas se conservan.")).toBeVisible();
+  await expect(page.getByText("Todavía no tienes rutinas.")).toBeVisible();
+  await page.goto(`/sesiones/${sesion1}`);
+  await expect(page.locator(".exercise-card h3")).toHaveText(["Fondos F", "Press F", "Aperturas F"]);
+  await expect(page.getByRole("region", { name: "Fondos F" }).locator(".ex-goal")).toHaveText("Meta: 3 × 8–12");
+
+  // «Guardar como rutina» desde el menú de la sesión finalizada.
+  await page.getByRole("button", { name: "Acciones de la sesión" }).click();
+  await page.getByRole("menuitem", { name: "Guardar como rutina" }).click();
+  await expect(page).toHaveURL(new RegExp(`/rutinas/nueva\\?desde=${sesion1}$`));
+  await expect(page.getByText("Ejercicios de la sesión del")).toBeVisible();
+  await expect(filas.locator("strong")).toHaveText(["Fondos F", "Press F", "Aperturas F"]);
+  await expect(page.getByLabel("Series objetivo de Fondos F")).toHaveValue("");
+  await expect(page.getByLabel("Nombre")).toHaveValue("");
+  await page.getByRole("button", { name: "Guardar rutina" }).click();
+  await expect(page.locator(".field-error")).toHaveText("Escribe un nombre para la rutina");
+  await page.getByLabel("Nombre").fill("Desde sesión");
+  await page.getByRole("button", { name: "Bajar Fondos F" }).click();
+  await page.getByRole("button", { name: "Guardar rutina" }).click();
+  await expect(page.getByText("Rutina «Desde sesión» guardada.")).toBeVisible();
+  await expect(page.getByRole("listitem", { name: "Desde sesión" }).locator(".routine-card-exercises > li")).toHaveText([
+    "Press F",
+    "Fondos F",
+    "Aperturas F",
+  ]);
+
+  // Ejercicio archivado después de guardar: se identifica, se omite al usar y se puede reemplazar.
+  await page.goto("/ejercicios");
+  await catalogRow(page, "Press F").getByRole("button").click();
+  await page.getByRole("dialog", { name: "Editar ejercicio" }).getByRole("button", { name: "Archivar ejercicio" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "«Press F» archivado" })).toBeVisible();
+  await page.goto("/rutinas");
+  const desde = page.getByRole("listitem", { name: "Desde sesión" });
+  await expect(desde.getByText("Archivado", { exact: true })).toBeVisible();
+  await expect(desde.getByText("Se omitirá al usarla: Press F (archivado).")).toBeVisible();
+  await desde.getByRole("button", { name: "Usar rutina Desde sesión" }).click();
+  const aviso = page.getByRole("dialog", { name: "Ya tienes un entrenamiento en curso hoy" });
+  await expect(aviso.getByText("Se omitirán por estar archivados: Press F.")).toBeVisible();
+  await shot(page, "17d-usar-con-archivado");
+  await aviso.getByRole("button", { name: "Iniciar otra con esta rutina" }).click();
+  await expect(page.getByText("Se omitió por estar archivado: Press F.")).toBeVisible();
+  await expect(page.locator(".exercise-card h3")).toHaveText(["Fondos F", "Aperturas F"]);
+  // Reemplazarlo en la plantilla.
+  await page.goto("/rutinas");
+  await desde.getByRole("link", { name: "Editar rutina Desde sesión" }).click();
+  const archivada = filas.filter({ hasText: "Press F" });
+  await expect(archivada.getByText("Este ejercicio está archivado")).toBeVisible();
+  await archivada.getByRole("button", { name: "Reemplazar" }).click();
+  await agregarEnSelector(page, "Remo F", "Espalda");
+  await expect(filas.locator("strong")).toHaveText(["Remo F", "Fondos F", "Aperturas F"]);
+  await page.getByRole("button", { name: "Guardar rutina" }).click();
+  await expect(desde.getByText("Archivado", { exact: true })).toHaveCount(0);
+
+  // Todos los ejercicios archivados: pide editar la rutina y no crea sesión.
+  await page.getByRole("link", { name: "Nueva rutina" }).first().click();
+  await page.getByLabel("Nombre").fill("Solo aperturas");
+  await agregar("Aperturas F");
+  await page.getByRole("button", { name: "Guardar rutina" }).click();
+  await expect(page.getByText("Rutina «Solo aperturas» guardada.")).toBeVisible();
+  await page.goto("/ejercicios");
+  await catalogRow(page, "Aperturas F").getByRole("button").click();
+  await page.getByRole("dialog", { name: "Editar ejercicio" }).getByRole("button", { name: "Archivar ejercicio" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "«Aperturas F» archivado" })).toBeVisible();
+  await page.goto("/historial");
+  const antes = await page.locator(".history-card").count();
+  await page.goto("/rutinas");
+  await page.getByRole("button", { name: "Usar rutina Solo aperturas" }).click();
+  const bloqueada = page.getByRole("dialog", { name: "No se puede usar esta rutina" });
+  await expect(bloqueada.getByRole("link", { name: "Editar rutina" })).toBeVisible();
+  await bloqueada.getByRole("button", { name: "Cancelar" }).click();
+  await page.goto("/historial");
+  await expect(page.locator(".history-card")).toHaveCount(antes);
+
+  // 375 px: la lista se lee sin scroll horizontal y la barra inferior no tapa la última rutina.
+  await page.goto("/rutinas");
+  await shot(page, "17e-rutinas-375");
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(300);
+  const ultima = (await page.locator(".routine-card").last().boundingBox())!;
+  const nav = (await page.getByRole("navigation", { name: "Navegación principal" }).boundingBox())!;
+  expect(ultima.y + ultima.height).toBeLessThanOrEqual(nav.y);
+
+  // Aislamiento: otra cuenta no ve ni abre las rutinas de esta.
+  const ajenaRutina = (await page.getByRole("link", { name: "Editar rutina Desde sesión" }).getAttribute("href"))!;
+  const otra = await newPage(browser);
+  await login(otra, userG.email, userG.temp);
+  await otra.getByLabel("Nueva contraseña", { exact: true }).fill(userG.final);
+  await otra.getByLabel("Repite la nueva contraseña").fill(userG.final);
+  await otra.getByRole("button", { name: "Guardar contraseña" }).click();
+  await expect(otra).toHaveURL(/\/$/);
+  await otra.goto("/rutinas");
+  await expect(otra.getByText("Todavía no tienes rutinas.")).toBeVisible();
+  await otra.goto(ajenaRutina);
+  await expect(otra.getByRole("heading", { name: "No encontrado" })).toBeVisible();
+  await otra.goto(`/rutinas/nueva?desde=${sesion1}`);
+  await expect(otra.locator(".routine-ex")).toHaveCount(0);
+  await otra.context().close();
+  await context.close();
+});
+
+/** En un selector ya abierto: crea el ejercicio y lo elige. */
+async function agregarEnSelector(page: Page, name: string, muscle: string) {
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Buscar ejercicio").fill(name);
+  await dialog.locator(".picker-foot").getByRole("button", { name: "Crear ejercicio" }).click();
+  await dialog.getByLabel("Grupo muscular").selectOption({ label: muscle });
+  await dialog.getByRole("button", { name: "Crear y agregar a la rutina" }).click();
+  await expect(dialog).toBeHidden();
+}
+
 test("cuenta B no accede a los datos de A, ni por URL directa", async ({ browser }) => {
   const page = await newPage(browser);
   await login(page, userB.email, userB.temp);
