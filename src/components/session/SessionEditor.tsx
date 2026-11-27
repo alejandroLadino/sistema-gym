@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deleteSession, finishSession, getPreviousSets, saveSession } from "@/app/actions/sessions";
 import { ActionsMenu } from "@/components/ActionsMenu";
-import { IconCalendar, IconChevronDown, IconCopy, IconList, IconPencil, IconPlus, IconTrash } from "@/components/icons";
+import { IconCalendar, IconChevronDown, IconCopy, IconGrip, IconList, IconPencil, IconPlus, IconTrash } from "@/components/icons";
 import { formatSequence, formatSetTotals, formatStep, isBlockSet, sameShape, type BlockPlan } from "@/lib/blocks";
 import { formatDate, summarizeSets, todayLocal } from "@/lib/format";
 import { historyHref } from "@/lib/history-query";
@@ -39,6 +39,7 @@ import type { Exercise, MuscleGroup, PreviousSets, SessionData } from "@/lib/typ
 import { uuidv4 } from "@/lib/uuid";
 import { ExercisePicker } from "./ExercisePicker";
 import { CardMenu } from "./CardMenu";
+import { useCardDrag } from "./useCardDrag";
 import { BlockSetSheet, emptyBlocks } from "./BlockSetSheet";
 import { QuickAddSets, quickRepsInputId } from "./QuickAddSets";
 
@@ -553,6 +554,33 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
     setNotice("Copia local descartada. Esta es la versión guardada de la sesión.");
   }
 
+  // --- Reordenar ejercicios (arrastre o «Mover arriba/abajo») -----------------------
+  const [moveMsg, setMoveMsg] = useState("");
+  /**
+   * Mueve un ejercicio por su clave estable a la posición `to`. Usa el borrador más
+   * reciente (conserva series, bloques, metas y cambios pendientes) y el autoguardado.
+   */
+  const moveExercise = useCallback(
+    (key: string, to: number) => {
+      const current = draftRef.current;
+      if (!current) return;
+      const from = current.exercises.findIndex((e) => e.key === key);
+      if (from < 0 || to < 0 || to >= current.exercises.length || from === to) return;
+      const name = current.exercises[from].name;
+      update((d) => {
+        const list = [...d.exercises];
+        const i = list.findIndex((e) => e.key === key);
+        const [item] = list.splice(i, 1);
+        list.splice(to, 0, item);
+        return { ...d, exercises: list };
+      });
+      setMoveMsg(`${name} movido a la posición ${to + 1} de ${current.exercises.length}.`);
+    },
+    [update],
+  );
+  const exerciseKeys = draft?.exercises.map((e) => e.key) ?? [];
+  const reorder = useCardDrag({ keys: exerciseKeys, cardId: (k) => `tarjeta-${k}`, listId: "lista-ejercicios", onDrop: moveExercise });
+
   if (!draft) {
     return <p className="muted" aria-live="polite">Cargando entrenamiento…</p>;
   }
@@ -640,7 +668,22 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
           <p className="muted" style={{ margin: 0 }}>Agrega tu primer ejercicio para empezar a registrar series.</p>
         ) : null}
 
-        {draft.exercises.map((ex) => {
+        <p id="reordenar-ayuda" className="sr-only">
+          Mantén presionado el tirador y arrastra para cambiar el orden. Con el teclado, usa las flechas arriba y abajo.
+        </p>
+        <p className="sr-only" role="status" aria-live="polite">{moveMsg}</p>
+        <div className="exercise-list" id="lista-ejercicios">
+        {reorder.drag ? (
+          <div
+            className="drop-slot"
+            aria-hidden="true"
+            style={{
+              top: reorder.drag.slotTop,
+              height: reorder.drag.slotHeight,
+            }}
+          />
+        ) : null}
+        {draft.exercises.map((ex, exIndex) => {
           const prev = prevForDate?.[ex.exerciseId];
           const empty = hasNoSets(ex.sets);
           const showQuick = empty || Boolean(quickOpen[ex.key]);
@@ -657,6 +700,9 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
               className="card exercise-card"
               aria-label={ex.name}
               data-collapsed={isCollapsed || undefined}
+              data-dragging={reorder.drag?.key === ex.key || undefined}
+              data-shifting={(reorder.drag && reorder.drag.key !== ex.key) || undefined}
+              style={reorder.styleFor(ex.key, exIndex)}
             >
               <div className="ex-head">
                 <button
@@ -681,7 +727,32 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
                     {ex.archived ? <span className="badge">Archivado</span> : null}
                   </span>
                 </button>
-                <CardMenu exerciseName={ex.name} onRemove={() => removeExercise(ex)} />
+                {draft.exercises.length >= 2 ? (
+                  <button
+                    type="button"
+                    className="drag-handle"
+                    aria-label={`Reordenar ${ex.name}`}
+                    aria-describedby="reordenar-ayuda"
+                    {...reorder.handleProps(ex.key)}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowUp" && exIndex > 0) {
+                        e.preventDefault();
+                        moveExercise(ex.key, exIndex - 1);
+                      } else if (e.key === "ArrowDown" && exIndex < draft.exercises.length - 1) {
+                        e.preventDefault();
+                        moveExercise(ex.key, exIndex + 1);
+                      }
+                    }}
+                  >
+                    <IconGrip />
+                  </button>
+                ) : null}
+                <CardMenu
+                  exerciseName={ex.name}
+                  onRemove={() => removeExercise(ex)}
+                  onMoveUp={exIndex > 0 ? () => moveExercise(ex.key, exIndex - 1) : null}
+                  onMoveDown={exIndex < draft.exercises.length - 1 ? () => moveExercise(ex.key, exIndex + 1) : null}
+                />
               </div>
 
               {!isCollapsed ? (
@@ -798,6 +869,7 @@ export function SessionEditor({ userId, exercises, muscleGroups, initial, initia
             </section>
           );
         })}
+        </div>
 
         <button type="button" className="btn btn-primary btn-lg btn-block" onClick={() => setPickerOpen(true)}>
           <IconPlus /> Agregar ejercicio

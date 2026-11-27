@@ -721,3 +721,26 @@ html:has(.session-head) { scroll-padding-top: 124px; }
 .step-add { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .block-sheet .block-foot { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .block-sheet .block-foot .block-preview { margin: 0; padding: 8px 10px; font-size: 0.9rem; }
+
+/* --- Reordenar ejercicios por arrastre ------------------------------------------ */
+.exercise-list { position: relative; display: grid; gap: 12px; }
+.drag-handle {
+  flex: none; width: 44px; min-height: 44px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 10px; background: none; color: var(--muted); cursor: grab;
+  /* El tirador no desplaza la página (el resto de la tarjeta sí): permite la presión larga. */
+  touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent; transition: background-color 0.15s ease, color 0.15s ease;
+}
+.drag-handle svg { width: 20px; height: 20px; }
+.drag-handle:hover { color: var(--text); background: var(--surface-2); }
+.drag-handle:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 1px; }
+.exercise-card[data-dragging] { position: relative; z-index: 6; transition: none; box-shadow: var(--shadow-raised);
+  border-color: var(--primary); outline: 2px solid color-mix(in srgb, var(--primary) 35%, transparent); }
+.exercise-card[data-dragging] .drag-handle { color: var(--primary); background: var(--primary-soft); cursor: grabbing; }
+.exercise-card[data-shifting] { transition: transform 0.18s ease; }
+.drop-slot {
+  position: absolute; left: 0; right: 0; z-index: 0; pointer-events: none; border-radius: var(--radius);
+  border: 2px dashed color-mix(in srgb, var(--primary) 70%, transparent);
+  background: color-mix(in srgb, var(--primary-soft) 70%, transparent);
+}
+html.is-dragging-card, html.is-dragging-card * { -webkit-user-select: none; user-select: none; cursor: grabbing; }
